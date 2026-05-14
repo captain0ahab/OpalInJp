@@ -68,6 +68,14 @@ select:focus { outline: none; border-color: #5dade2; }
 .btn-search:hover:not(:disabled) { background: #3498db; }
 .btn-search:disabled { background: #1e3357; color: #4a6fa5; cursor: default; }
 
+.btn-copy {
+  width: 100%; padding: 7px; margin-top: 6px;
+  background: #1e3a5f; color: #7fb3d3; border: 1px solid #2d6a9f;
+  border-radius: 4px; cursor: pointer;
+  font-size: 0.82rem; transition: background 0.15s;
+}
+.btn-copy:hover { background: #2d5a8e; color: #e8e8e8; }
+
 /* 結果ヘッダー */
 .result-hdr {
   font-size: 0.72rem; color: #8baabf;
@@ -155,6 +163,9 @@ select:focus { outline: none; border-color: #5dade2; }
       <button class="btn-search" id="searchBtn" onclick="doSearch()" disabled>
         🔍 この地点を調査する
       </button>
+      <button class="btn-copy" id="copyBtn" onclick="copyUrl()" style="display:none">
+        🔗 このURLをコピー
+      </button>
     </div>
 
     <div class="result-panel">
@@ -226,6 +237,11 @@ function doSearch() {
   const mineral = document.getElementById('mineralSel').value;
   const btn     = document.getElementById('searchBtn');
 
+  // URL を更新（シェア用）
+  const params = new URLSearchParams({ lat: selLat, lon: selLon, radius_km: radius, mineral });
+  history.pushState(null, '', '?' + params.toString());
+  document.getElementById('copyBtn').style.display = 'block';
+
   btn.disabled = true;
   document.getElementById('loadingMsg').style.display = 'block';
   document.getElementById('resultHdr').style.display  = 'none';
@@ -249,6 +265,44 @@ function doSearch() {
       document.getElementById('loadingMsg').style.display = 'none';
     });
 }
+
+// ── URL コピー ────────────────────────────────────────
+function copyUrl() {
+  navigator.clipboard.writeText(location.href).then(() => {
+    const btn = document.getElementById('copyBtn');
+    const orig = btn.textContent;
+    btn.textContent = '✅ コピーしました';
+    setTimeout(() => btn.textContent = orig, 2000);
+  });
+}
+
+// ── URL パラメーターから自動復元 ──────────────────────
+(function restoreFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (!p.has('lat') || !p.has('lon')) return;
+
+  selLat = parseFloat(p.get('lat'));
+  selLon = parseFloat(p.get('lon'));
+  const radius  = p.get('radius_km') || '20';
+  const mineral = p.get('mineral')   || 'all';
+
+  document.getElementById('coordBox').textContent = selLat + '°N,  ' + selLon + '°E';
+  document.getElementById('radiusSl').value       = radius;
+  document.getElementById('radiusNum').textContent = radius;
+  document.getElementById('mineralSel').value     = mineral;
+  document.getElementById('searchBtn').disabled   = false;
+
+  if (pinMarker) map.removeLayer(pinMarker);
+  pinMarker = L.marker([selLat, selLon], {
+    icon: L.divIcon({
+      html: '<div style="font-size:26px;transform:translate(-50%,-100%)">📍</div>',
+      iconSize: [0, 0], className: ''
+    })
+  }).addTo(map);
+
+  map.setView([selLat, selLon], 9);
+  doSearch();
+})();
 
 // ── 結果描画 ──────────────────────────────────────────
 function ratioColor(ratio) {
