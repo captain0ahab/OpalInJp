@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鉱物産地探索マップ</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif; }
+body { display: flex; flex-direction: column; background: #1a1a2e; color: #e8e8e8; }
+
+/* ── ヘッダー ── */
+header {
+  padding: 8px 16px;
+  background: #12122a;
+  border-bottom: 2px solid #2980b9;
+  display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0; z-index: 1000;
+}
+header h1 { font-size: 1rem; letter-spacing: 0.05em; }
+.hint { margin-left: auto; font-size: 0.72rem; color: #7fb3d3; }
+
+/* ── メイン ── */
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── サイドバー ── */
+.sidebar {
+  width: 260px; flex-shrink: 0;
+  background: #12122a;
+  border-right: 1px solid #1e3a5f;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.ctrl-panel { padding: 12px; border-bottom: 1px solid #1e3a5f; flex-shrink: 0; }
+.result-panel { flex: 1; overflow-y: auto; padding: 10px; }
+
+/* フォーム */
+.fg { margin-bottom: 11px; }
+.fg label {
+  display: block; font-size: 0.69rem; color: #8baabf;
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;
+}
+select {
+  width: 100%; padding: 6px 8px;
+  background: #1e3a5f; border: 1px solid #2d6a9f;
+  border-radius: 4px; color: #e8e8e8; font-size: 0.87rem; cursor: pointer;
+}
+select:focus { outline: none; border-color: #5dade2; }
+
+.radius-row { display: flex; align-items: center; gap: 8px; }
+.radius-row input[type=range] { flex: 1; cursor: pointer; accent-color: #2980b9; }
+.radius-val { font-size: 0.87rem; min-width: 48px; text-align: right; color: #5dade2; font-weight: bold; }
+
+.coord-box {
+  background: #0d1b2e; border: 1px solid #1e3a5f; border-radius: 4px;
+  padding: 6px 8px; font-size: 0.79rem; color: #7fb3d3; margin-bottom: 11px;
+  font-family: 'Courier New', monospace;
+}
+
+.btn-search {
+  width: 100%; padding: 9px;
+  background: #2980b9; color: white; border: none;
+  border-radius: 4px; cursor: pointer;
+  font-size: 0.93rem; font-weight: bold;
+  transition: background 0.15s;
+}
+.btn-search:hover:not(:disabled) { background: #3498db; }
+.btn-search:disabled { background: #1e3357; color: #4a6fa5; cursor: default; }
+
+/* 結果ヘッダー */
+.result-hdr {
+  font-size: 0.72rem; color: #8baabf;
+  padding: 4px 0 8px; border-bottom: 1px solid #1e3a5f; margin-bottom: 8px;
+  display: none;
+}
+.result-hdr b { color: #5dade2; }
+
+.loading-msg { text-align: center; color: #8baabf; font-size: 0.82rem; padding: 20px 0; display: none; }
+
+/* 結果カード */
+.card {
+  background: #0d1b2e; border-radius: 5px;
+  border-left: 3px solid #2980b9;
+  padding: 8px 10px; margin-bottom: 5px;
+  cursor: pointer; transition: background 0.1s;
+}
+.card:hover { background: #142840; }
+.card-top { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+.card-score { font-size: 1.1rem; font-weight: bold; }
+.card-dist { font-size: 0.74rem; color: #7fb3d3; }
+.badge {
+  display: inline-block; font-size: 0.6rem;
+  padding: 1px 5px; border-radius: 3px; vertical-align: middle;
+}
+.b-fault  { background: #922b21; }
+.b-hot    { background: #1a5276; }
+.card-lith { font-size: 0.74rem; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-age  { font-size: 0.7rem; color: #6ca; }
+
+/* ── マップ ── */
+#map { flex: 1; }
+
+/* ── Leaflet ポップアップ ── */
+.leaflet-popup-content-wrapper {
+  background: #0d1b2e; color: #e8e8e8;
+  border: 1px solid #2980b9; border-radius: 6px;
+  box-shadow: 0 3px 14px rgba(0,0,0,.5);
+}
+.leaflet-popup-tip { background: #0d1b2e; }
+.leaflet-popup-content { font-size: 0.81rem; line-height: 1.65; min-width: 220px; }
+.p-score { font-size: 1.1rem; font-weight: bold; }
+.p-divider { border-top: 1px solid #1e3a5f; margin: 6px 0; }
+.p-minerals { font-size: 0.73rem; color: #8baabf; line-height: 1.7; }
+.p-minerals b { color: #f0b429; }
+.p-gmap { display: inline-block; margin-top: 6px; color: #5dade2; font-size: 0.75rem; text-decoration: none; }
+.p-gmap:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:1.3rem">🗾</span>
+  <h1>鉱物産地探索マップ</h1>
+  <span class="hint">地図をクリック → 鉱物・半径を選択 → 調査</span>
+</header>
+
+<div class="main">
+
+  <!-- ── サイドバー ── -->
+  <div class="sidebar">
+    <div class="ctrl-panel">
+
+      <div class="coord-box" id="coordBox">地図をクリックして調査地点を選択</div>
+
+      <div class="fg">
+        <label>対象鉱物</label>
+        <select id="mineralSel">
+          <option value="all">── 全鉱物（合計スコア）</option>
+          {% for key, name in minerals.items() %}
+          <option value="{{ key }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="fg">
+        <label>調査半径</label>
+        <div class="radius-row">
+          <input type="range" id="radiusSl" min="1" max="100" value="20"
+                 oninput="document.getElementById('radiusNum').textContent=this.value">
+          <span class="radius-val"><span id="radiusNum">20</span> km</span>
+        </div>
+      </div>
+
+      <button class="btn-search" id="searchBtn" onclick="doSearch()" disabled>
+        🔍 この地点を調査する
+      </button>
+    </div>
+
+    <div class="result-panel">
+      <div class="result-hdr" id="resultHdr"></div>
+      <div class="loading-msg" id="loadingMsg">⏳ 検索中...</div>
+      <div id="resultList"></div>
+    </div>
+  </div>
+
+  <!-- ── 地図 ── -->
+  <div id="map"></div>
+
+</div><!-- .main -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── 定数 ──────────────────────────────────────────────
+const MINERAL_KEYS = [
+  'opal','gold','jade','quartz','garnet',
+  'magnetite','fluorite','stibnite','rhodochrosite'
+];
+const MINERAL_NAMES = {
+  all:'合計', opal:'オパール', gold:'砂金', jade:'翡翠', quartz:'水晶',
+  garnet:'ザクロ石', magnetite:'磁鉄鉱', fluorite:'蛍石',
+  stibnite:'輝安鉱', rhodochrosite:'菱マンガン鉱'
+};
+
+// ── 地図初期化 ─────────────────────────────────────────
+const map = L.map('map', { center:[36.5, 137.0], zoom:6 });
+
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+  attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
+  maxZoom:18
+}).addTo(map);
+
+// 東京
+L.circleMarker([35.6895, 139.6917], {
+  radius:7, color:'#2980b9', fillColor:'#3498db', fillOpacity:0.9, weight:2
+}).bindTooltip('東京', {permanent:true, direction:'right', className:'tokyo-tip'}).addTo(map);
+
+// ── 状態 ─────────────────────────────────────────────
+let selLat = null, selLon = null;
+let pinMarker = null, radiusCircle = null;
+const resultLayer = L.layerGroup().addTo(map);
+
+// ── 地図クリック ───────────────────────────────────────
+map.on('click', e => {
+  selLat = parseFloat(e.latlng.lat.toFixed(5));
+  selLon = parseFloat(e.latlng.lng.toFixed(5));
+
+  document.getElementById('coordBox').textContent =
+    selLat + '°N,  ' + selLon + '°E';
+  document.getElementById('searchBtn').disabled = false;
+
+  if (pinMarker) map.removeLayer(pinMarker);
+  pinMarker = L.marker([selLat, selLon], {
+    icon: L.divIcon({
+      html: '<div style="font-size:26px;transform:translate(-50%,-100%)">📍</div>',
+      iconSize: [0, 0], className: ''
+    })
+  }).addTo(map);
+});
+
+// ── 検索 ─────────────────────────────────────────────
+function doSearch() {
+  if (!selLat) return;
+
+  const radius  = document.getElementById('radiusSl').value;
+  const mineral = document.getElementById('mineralSel').value;
+  const btn     = document.getElementById('searchBtn');
+
+  btn.disabled = true;
+  document.getElementById('loadingMsg').style.display = 'block';
+  document.getElementById('resultHdr').style.display  = 'none';
+  document.getElementById('resultList').innerHTML = '';
+  resultLayer.clearLayers();
+
+  if (radiusCircle) map.removeLayer(radiusCircle);
+  radiusCircle = L.circle([selLat, selLon], {
+    radius: radius * 1000,
+    color:'#2980b9', fillColor:'#2980b9', fillOpacity:0.05,
+    weight:1.5, dashArray:'6 4'
+  }).addTo(map);
+
+  fetch('/api/search?lat=' + selLat + '&lon=' + selLon +
+        '&radius_km=' + radius + '&mineral=' + mineral)
+    .then(r => r.json())
+    .then(renderResults)
+    .catch(err => alert('エラー: ' + err.message))
+    .finally(() => {
+      btn.disabled = false;
+      document.getElementById('loadingMsg').style.display = 'none';
+    });
+}
+
+// ── 結果描画 ──────────────────────────────────────────
+function ratioColor(ratio) {
+  if (ratio >= 0.75) return '#e74c3c';
+  if (ratio >= 0.50) return '#e67e22';
+  if (ratio >= 0.25) return '#f1c40f';
+  return '#5dade2';
+}
+
+function mineralBreakdown(row, labels) {
+  const parts = [];
+  for (const key of MINERAL_KEYS) {
+    const v = row['score_' + key];
+    if (v && v > 0) {
+      const nm = (labels && labels[key]) || MINERAL_NAMES[key] || key;
+      parts.push('<span style="color:#8baabf">' + nm + ':</span> <b>' + v.toFixed(1) + '</b>');
+    }
+  }
+  if (row.score_hydrothermal && row.score_hydrothermal > 0)
+    parts.push('<span style="color:#8baabf">熱水変質:</span> <b>' + row.score_hydrothermal.toFixed(1) + '</b>');
+  return parts.join('&ensp;');
+}
+
+function renderResults(data) {
+  document.getElementById('loadingMsg').style.display = 'none';
+
+  const hdr  = document.getElementById('resultHdr');
+  const list = document.getElementById('resultList');
+  hdr.style.display = 'block';
+
+  if (!data.results || data.results.length === 0) {
+    hdr.innerHTML = 'この範囲に有望ポリゴンなし';
+    return;
+  }
+
+  hdr.innerHTML = '範囲内 <b>' + data.count + '</b> ポリゴン / 上位 <b>' + data.results.length + '</b> 件';
+
+  const maxScore = data.max_score || 1;
+  const mineral  = document.getElementById('mineralSel').value;
+
+  data.results.forEach(row => {
+    const score = row.sort_score || 0;
+    const ratio = maxScore > 0 ? score / maxScore : 0;
+    const c     = ratioColor(ratio);
+
+    // ── カード ──
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.borderLeftColor = c;
+
+    const faultBadge = row.near_fault ? '<span class="badge b-fault">断層近</span>' : '';
+    const hotBadge   = (row.score_hydrothermal > 0) ? '<span class="badge b-hot">熱水</span>' : '';
+
+    card.innerHTML =
+      '<div class="card-top">' +
+        '<span class="card-score" style="color:' + c + '">' + score.toFixed(1) + '</span>' +
+        '<span class="card-dist">📍 ' + (row.dist_km || '?') + 'km</span>' +
+        faultBadge + hotBadge +
+      '</div>' +
+      '<div class="card-lith">' + (row.lithology_ja || '—') + '</div>' +
+      '<div class="card-age">' + (row.formationage_ja || '—') + '</div>';
+
+    card.onclick = () => map.setView([row.lat, row.lon], 13);
+    list.appendChild(card);
+
+    // ── マーカー ──
+    const r = 4 + ratio * 7;
+    const marker = L.circleMarker([row.lat, row.lon], {
+      radius: r, color: c, fillColor: c, fillOpacity: 0.72, weight: 1
+    });
+
+    const gmapUrl   = 'https://maps.google.com/maps?q=' + row.lat + ',' + row.lon;
+    const mName     = MINERAL_NAMES[mineral] || '合計';
+    const breakdown = mineralBreakdown(row, data.mineral_labels);
+    const tokyoStr  = row.dist_tokyo_km ? '東京から: ' + Math.round(row.dist_tokyo_km) + ' km' : '';
+
+    marker.bindPopup(
+      '<span class="p-score" style="color:' + c + '">' + score.toFixed(1) + '</span>' +
+      ' <span style="font-size:0.8rem;color:#8baabf">(' + mName + ')</span><br>' +
+      '📍 調査地点から <b>' + (row.dist_km || '?') + ' km</b>' +
+      (tokyoStr ? '&ensp;' + tokyoStr : '') + '<br>' +
+      '🪨 ' + (row.lithology_ja || '—') + '<br>' +
+      '📅 ' + (row.formationage_ja || '—') + '<br>' +
+      '断層近接: ' + (row.near_fault ? '<span style="color:#e74c3c">○</span>' : '×') + '<br>' +
+      (row.score_hydrothermal > 0 ? '熱水変質スコア: <b>' + row.score_hydrothermal.toFixed(1) + '</b><br>' : '') +
+      '<div class="p-divider"></div>' +
+      '<div class="p-minerals">' + (breakdown || '—') + '</div>' +
+      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>',
+      { maxWidth: 300 }
+    );
+
+    resultLayer.addLayer(marker);
+  });
+}
+
+// Enter キーで検索
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('searchBtn').disabled) doSearch();
+});
+</script>
+</body>
+</html>

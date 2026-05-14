@@ -1,0 +1,22 @@
+# 生データ（大容量 - Renderデプロイ不要）
+files/
+
+# 解析スクリプトが生成するHTMLマップ（大きいが任意）
+output/*.html
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+*.pyo
+
+# 仮想環境
+venv/
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# テスト用
+test_overpass.py
