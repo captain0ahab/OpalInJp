@@ -76,6 +76,35 @@ select:focus { outline: none; border-color: #5dade2; }
 }
 .btn-copy:hover { background: #2d5a8e; color: #e8e8e8; }
 
+/* ── 場所検索バー ── */
+.place-search-row { display: flex; gap: 5px; margin-bottom: 11px; }
+.place-input {
+  flex: 1; padding: 6px 8px;
+  background: #1e3a5f; border: 1px solid #2d6a9f;
+  border-radius: 4px; color: #e8e8e8; font-size: 0.87rem;
+}
+.place-input::placeholder { color: #4a6fa5; }
+.place-input:focus { outline: none; border-color: #5dade2; }
+.btn-place {
+  padding: 6px 10px;
+  background: #1e3a5f; color: #7fb3d3; border: 1px solid #2d6a9f;
+  border-radius: 4px; cursor: pointer; font-size: 0.82rem;
+  white-space: nowrap; transition: background 0.15s;
+}
+.btn-place:hover  { background: #2d5a8e; color: #e8e8e8; }
+.btn-place:disabled { color: #4a6fa5; cursor: default; }
+
+/* Leaflet 現在位置ボタン */
+.leaflet-control-location {
+  width: 34px; height: 34px;
+  background: #12122a !important; border: 2px solid #2d6a9f !important;
+  border-radius: 5px; cursor: pointer; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center;
+  color: #7fb3d3; transition: background 0.15s; line-height: 1;
+}
+.leaflet-control-location:hover    { background: #1e3a5f !important; color: #5dade2; }
+.leaflet-control-location:disabled { color: #4a6fa5; cursor: default; }
+
 /* ドロワー専用要素（デスクトップでは非表示） */
 .drawer-handle, .mini-bar { display: none; }
 
@@ -177,10 +206,12 @@ select:focus { outline: none; border-color: #5dade2; }
   }
   .sidebar.drawer-open .ctrl-panel { display: grid; }
 
+  .place-search-row { grid-column: 1 / -1; margin-bottom: 0; }
+  .place-input { font-size: 0.82rem; }
   .coord-box   { grid-column: 1 / -1; font-size: 0.72rem; margin-bottom: 0; }
   .fg          { margin-bottom: 0; }
-  .fg:nth-child(2) { grid-column: 1; }
-  .fg:nth-child(3) { grid-column: 2; }
+  .fg:nth-child(3) { grid-column: 1; }
+  .fg:nth-child(4) { grid-column: 2; }
   .btn-search  { grid-column: 1; padding: 8px; font-size: 0.82rem; }
   .btn-copy    { grid-column: 2; margin-top: 0; }
 
@@ -285,7 +316,15 @@ select:focus { outline: none; border-color: #5dade2; }
     </div>
     <div class="ctrl-panel">
 
-      <div class="coord-box" id="coordBox">地図をクリックして調査地点を選択</div>
+      <!-- 場所検索 -->
+      <div class="place-search-row">
+        <input type="text" id="placeInput" class="place-input"
+               placeholder="地名・住所で検索…"
+               onkeydown="if(event.key==='Enter')searchPlace()">
+        <button class="btn-place" id="placeBtn" onclick="searchPlace()">検索</button>
+      </div>
+
+      <div class="coord-box" id="coordBox">地図・検索で調査地点を選択</div>
 
       <div class="fg">
         <label>対象鉱物</label>
@@ -414,23 +453,84 @@ function updateMiniBar() {
   document.getElementById('miniSearchBtn').disabled = !selLat;
 }
 
-// ── 地図クリック ───────────────────────────────────────
-map.on('click', e => {
-  selLat = parseFloat(e.latlng.lat.toFixed(5));
-  selLon = parseFloat(e.latlng.lng.toFixed(5));
-
-  document.getElementById('coordBox').textContent =
-    selLat + '°N,  ' + selLon + '°E';
+// ── ピン設置ヘルパー ────────────────────────────────────────
+function setPin(lat, lon) {
+  selLat = lat; selLon = lon;
+  document.getElementById('coordBox').textContent = lat + '°N,  ' + lon + '°E';
   document.getElementById('searchBtn').disabled = false;
-
   if (pinMarker) map.removeLayer(pinMarker);
-  pinMarker = L.marker([selLat, selLon], {
+  pinMarker = L.marker([lat, lon], {
     icon: L.divIcon({
       html: '<div style="font-size:26px;transform:translate(-50%,-100%)">📍</div>',
       iconSize: [0, 0], className: ''
     })
   }).addTo(map);
   updateMiniBar();
+}
+
+// ── 場所検索（Nominatim）────────────────────────────────────
+async function searchPlace() {
+  const q = document.getElementById('placeInput').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('placeBtn');
+  const orig = btn.textContent;
+  btn.textContent = '…'; btn.disabled = true;
+  try {
+    const params = new URLSearchParams({
+      q, format: 'json', limit: 1, countrycodes: 'jp', 'accept-language': 'ja'
+    });
+    const res  = await fetch('https://nominatim.openstreetmap.org/search?' + params);
+    const data = await res.json();
+    if (!data.length) { alert('「' + q + '」が見つかりませんでした'); return; }
+    const la = parseFloat((+data[0].lat).toFixed(5));
+    const lo = parseFloat((+data[0].lon).toFixed(5));
+    setPin(la, lo);
+    const bb = data[0].boundingbox;
+    if (bb) map.fitBounds([[+bb[0], +bb[2]], [+bb[1], +bb[3]]], { maxZoom: 13 });
+    else    map.setView([la, lo], 12);
+  } catch(e) {
+    alert('検索エラー: ' + e.message);
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+}
+
+// ── 現在位置 ─────────────────────────────────────────────────
+function goToCurrentLocation() {
+  if (!navigator.geolocation) { alert('位置情報を利用できません'); return; }
+  const btn = document.getElementById('locationBtn');
+  if (btn) { btn.innerHTML = '⌛'; btn.disabled = true; }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const la = parseFloat(pos.coords.latitude.toFixed(5));
+      const lo = parseFloat(pos.coords.longitude.toFixed(5));
+      setPin(la, lo);
+      map.setView([la, lo], 12);
+      if (btn) { btn.innerHTML = '🎯'; btn.disabled = false; }
+    },
+    () => {
+      alert('位置情報の取得に失敗しました');
+      if (btn) { btn.innerHTML = '🎯'; btn.disabled = false; }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+// ── Leaflet 現在位置コントロール ──────────────────────────────
+const LocationControl = L.Control.extend({
+  onAdd: function() {
+    const btn = L.DomUtil.create('button', 'leaflet-control-location');
+    btn.id = 'locationBtn'; btn.innerHTML = '🎯'; btn.title = '現在地を表示';
+    L.DomEvent.disableClickPropagation(btn);
+    btn.onclick = goToCurrentLocation;
+    return btn;
+  }
+});
+new LocationControl({ position: 'bottomright' }).addTo(map);
+
+// ── 地図クリック ───────────────────────────────────────
+map.on('click', e => {
+  setPin(parseFloat(e.latlng.lat.toFixed(5)), parseFloat(e.latlng.lng.toFixed(5)));
 });
 
 // ── 検索 ─────────────────────────────────────────────
@@ -484,29 +584,25 @@ function copyUrl() {
 // ── URL パラメーターから自動復元 ──────────────────────
 (function restoreFromUrl() {
   const p = new URLSearchParams(location.search);
-  if (!p.has('lat') || !p.has('lon')) return;
+  if (!p.has('lat') || !p.has('lon')) {
+    // URL パラメーターなし → 現在位置で初期表示
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => map.setView([pos.coords.latitude, pos.coords.longitude], 10),
+        () => {} // 失敗時はデフォルト中心（日本）のまま
+      );
+    }
+    return;
+  }
 
-  selLat = parseFloat(p.get('lat'));
-  selLon = parseFloat(p.get('lon'));
   const radius  = p.get('radius_km') || '20';
   const mineral = p.get('mineral')   || 'all';
-
-  document.getElementById('coordBox').textContent = selLat + '°N,  ' + selLon + '°E';
-  document.getElementById('radiusSl').value       = radius;
+  document.getElementById('radiusSl').value        = radius;
   document.getElementById('radiusNum').textContent = radius;
-  document.getElementById('mineralSel').value     = mineral;
-  document.getElementById('searchBtn').disabled   = false;
-
-  if (pinMarker) map.removeLayer(pinMarker);
-  pinMarker = L.marker([selLat, selLon], {
-    icon: L.divIcon({
-      html: '<div style="font-size:26px;transform:translate(-50%,-100%)">📍</div>',
-      iconSize: [0, 0], className: ''
-    })
-  }).addTo(map);
+  document.getElementById('mineralSel').value      = mineral;
+  setPin(parseFloat(p.get('lat')), parseFloat(p.get('lon')));
 
   map.setView([selLat, selLon], 9);
-  updateMiniBar();
   doSearch();
 })();
 
