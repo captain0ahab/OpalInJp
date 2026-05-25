@@ -76,6 +76,21 @@ select:focus { outline: none; border-color: #5dade2; }
 }
 .btn-copy:hover { background: #2d5a8e; color: #e8e8e8; }
 
+/* ── 半径プリセットボタン（デスクトップでは非表示） ── */
+.radius-presets { display: none; gap: 4px; }
+.r-preset {
+  flex: 1; padding: 10px 4px;
+  background: #1e3a5f; color: #7fb3d3;
+  border: 1px solid #2d6a9f; border-radius: 5px;
+  cursor: pointer; font-size: 0.85rem; font-weight: bold;
+  transition: background 0.15s; touch-action: manipulation;
+}
+.r-preset.active {
+  background: #2980b9; color: #fff;
+  border-color: #5dade2;
+}
+.r-preset:active { background: #3498db; color: #fff; }
+
 /* ── 場所検索バー ── */
 .place-search-row { display: flex; gap: 5px; margin-bottom: 11px; }
 .place-input {
@@ -210,8 +225,9 @@ select:focus { outline: none; border-color: #5dade2; }
   .place-input { font-size: 0.82rem; }
   .coord-box   { grid-column: 1 / -1; font-size: 0.72rem; margin-bottom: 0; }
   .fg          { margin-bottom: 0; }
-  .fg:nth-child(3) { grid-column: 1; }
-  .fg:nth-child(4) { grid-column: 2; }
+  .fg:nth-child(3) { grid-column: 1 / -1; } /* 鉱物: 全幅 */
+  .fg:nth-child(4) { display: none; }        /* スライダー: 非表示 */
+  .radius-presets  { display: flex; grid-column: 1 / -1; }
   .btn-search  { grid-column: 1; padding: 8px; font-size: 0.82rem; }
   .btn-copy    { grid-column: 2; margin-top: 0; }
 
@@ -343,6 +359,15 @@ select:focus { outline: none; border-color: #5dade2; }
                  oninput="document.getElementById('radiusNum').textContent=this.value">
           <span class="radius-val"><span id="radiusNum">20</span> km</span>
         </div>
+      </div>
+
+      <!-- モバイル用半径プリセット -->
+      <div class="radius-presets">
+        <button class="r-preset" data-km="5"   onclick="setRadius(5)">5km</button>
+        <button class="r-preset" data-km="10"  onclick="setRadius(10)">10km</button>
+        <button class="r-preset active" data-km="20" onclick="setRadius(20)">20km</button>
+        <button class="r-preset" data-km="50"  onclick="setRadius(50)">50km</button>
+        <button class="r-preset" data-km="100" onclick="setRadius(100)">100km</button>
       </div>
 
       <button class="btn-search" id="searchBtn" onclick="doSearch()" disabled>
@@ -599,6 +624,7 @@ function copyUrl() {
   const mineral = p.get('mineral')   || 'all';
   document.getElementById('radiusSl').value        = radius;
   document.getElementById('radiusNum').textContent = radius;
+  syncRadiusPresets(+radius);
   document.getElementById('mineralSel').value      = mineral;
   setPin(parseFloat(p.get('lat')), parseFloat(p.get('lon')));
 
@@ -729,6 +755,20 @@ document.addEventListener('keydown', e => {
 // 鉱物・半径が変わったらミニバーを更新（モバイル）
 document.getElementById('mineralSel').addEventListener('change', updateMiniBar);
 document.getElementById('radiusSl').addEventListener('input', updateMiniBar);
+
+// ── 半径プリセット制御 ──────────────────────────────────────
+function syncRadiusPresets(km) {
+  document.querySelectorAll('.r-preset').forEach(btn => {
+    btn.classList.toggle('active', +btn.dataset.km === km);
+  });
+}
+
+function setRadius(km) {
+  document.getElementById('radiusSl').value        = km;
+  document.getElementById('radiusNum').textContent = km;
+  syncRadiusPresets(km);
+  updateMiniBar();
+}
 </script>
 </body>
 </html>
