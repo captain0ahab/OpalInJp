@@ -76,46 +76,128 @@ select:focus { outline: none; border-color: #5dade2; }
 }
 .btn-copy:hover { background: #2d5a8e; color: #e8e8e8; }
 
-/* ── スマートフォン対応 ── */
+/* ドロワー専用要素（デスクトップでは非表示） */
+.drawer-handle, .mini-bar { display: none; }
+
+/* ── スマートフォン対応: フルスクリーン地図 + ボトムドロワー ── */
 @media (max-width: 767px) {
-  header { padding: 6px 10px; }
-  header h1 { font-size: 0.88rem; }
-  .hint { display: none; }
+  header { display: none; }
+  html, body { overflow: hidden; }
 
-  .main { flex-direction: column; }
+  .main { position: fixed; inset: 0; display: block; }
 
-  /* 地図を上に、サイドバーを下に */
-  #map { order: 1; height: 52vh; flex: none; }
-
-  .sidebar {
-    order: 2;
-    width: 100%;
-    max-height: 48vh;
-    border-right: none;
-    border-top: 2px solid #2980b9;
-    overflow: hidden;
+  #map {
+    position: absolute;
+    inset: 0;
+    height: 100% !important;
+    flex: none;
   }
 
-  /* コントロールをグリッドで2列に */
+  /* Leaflet ズームボタンをドロワーの上に */
+  .leaflet-bottom { bottom: 80px !important; }
+  .leaflet-control-attribution { font-size: 0.48rem !important; }
+
+  /* ── ドロワー本体 ── */
+  .sidebar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    width: 100%;
+    height: 72px;           /* ミニ状態 */
+    border-right: none;
+    border-top: 2px solid #2980b9;
+    border-radius: 16px 16px 0 0;
+    background: #12122a;
+    overflow: hidden;
+    transition: height 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+  }
+
+  .sidebar.drawer-open { height: 58vh; } /* 展開状態 */
+
+  /* ── ドラッグハンドル ── */
+  .drawer-handle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 22px;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 6px 0 2px;
+    touch-action: none;
+  }
+  .drawer-handle::before {
+    content: '';
+    width: 36px; height: 4px;
+    background: #2d6a9f;
+    border-radius: 2px;
+    transition: background 0.15s;
+  }
+  .drawer-handle:active::before { background: #5dade2; }
+
+  /* ── ミニバー（折りたたみ時） ── */
+  .mini-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px 10px;
+    flex-shrink: 0;
+  }
+  .mini-icon { width: 20px; height: 20px; flex-shrink: 0; }
+  .mini-icon svg { width: 20px; height: 20px; }
+  .mini-info {
+    flex: 1;
+    font-size: 0.78rem; color: #7fb3d3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mini-btn {
+    padding: 6px 12px;
+    background: #2980b9; color: white;
+    border: none; border-radius: 6px;
+    font-size: 1rem; cursor: pointer; flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .mini-btn:active { background: #3498db; }
+  .mini-btn:disabled { background: #1e3357; color: #4a6fa5; cursor: default; }
+
+  /* 展開時はミニバーを隠す */
+  .sidebar.drawer-open .mini-bar { display: none; }
+
+  /* ── コントロールパネル（展開時のみ） ── */
   .ctrl-panel {
-    padding: 8px 10px;
-    display: grid;
+    display: none;
+    padding: 6px 12px 8px;
+    border-bottom: 1px solid #1e3a5f;
+    flex-shrink: 0;
     grid-template-columns: 1fr 1fr;
     gap: 6px;
     align-items: end;
   }
+  .sidebar.drawer-open .ctrl-panel { display: grid; }
+
   .coord-box   { grid-column: 1 / -1; font-size: 0.72rem; margin-bottom: 0; }
   .fg          { margin-bottom: 0; }
-  .fg:nth-child(2) { grid-column: 1; } /* 鉱物 */
-  .fg:nth-child(3) { grid-column: 2; } /* 半径 */
-  .btn-search  { grid-column: 1; margin-top: 2px; padding: 8px; font-size: 0.82rem; }
-  .btn-copy    { grid-column: 2; margin-top: 2px; }
+  .fg:nth-child(2) { grid-column: 1; }
+  .fg:nth-child(3) { grid-column: 2; }
+  .btn-search  { grid-column: 1; padding: 8px; font-size: 0.82rem; }
+  .btn-copy    { grid-column: 2; margin-top: 0; }
 
-  /* 結果リスト */
-  .result-panel { max-height: none; padding: 6px 8px; }
-  .result-hdr   { font-size: 0.7rem; }
-  .card         { padding: 6px 8px; }
-  .card-score   { font-size: 1rem; }
+  /* ── 結果パネル（展開時のみ・スクロール） ── */
+  .result-panel {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar.drawer-open .result-panel { display: block; }
+
+  .result-hdr  { font-size: 0.7rem; }
+  .mineral-info { margin-bottom: 6px; }
+  .card        { padding: 6px 8px; }
+  .card-score  { font-size: 1rem; }
 }
 
 /* 結果ヘッダー */
@@ -191,8 +273,16 @@ select:focus { outline: none; border-color: #5dade2; }
 
 <div class="main">
 
-  <!-- ── サイドバー ── -->
-  <div class="sidebar">
+  <!-- ── サイドバー（モバイル: ボトムドロワー） ── -->
+  <div class="sidebar" id="drawer">
+    <!-- ドラッグハンドル（タップで開閉） -->
+    <div class="drawer-handle" id="drawerHandle"></div>
+    <!-- ミニバー（折りたたみ時に表示） -->
+    <div class="mini-bar" id="miniBar">
+      <div class="mini-icon" id="miniIcon"></div>
+      <div class="mini-info" id="miniInfo">地図をタップして選択</div>
+      <button class="mini-btn" id="miniSearchBtn" onclick="doSearch()" disabled>🔍</button>
+    </div>
     <div class="ctrl-panel">
 
       <div class="coord-box" id="coordBox">地図をクリックして調査地点を選択</div>
@@ -306,6 +396,24 @@ let selLat = null, selLon = null;
 let pinMarker = null, radiusCircle = null;
 const resultLayer = L.layerGroup().addTo(map);
 
+// ── モバイルドロワー制御 ──────────────────────────────────────
+const drawer = document.getElementById('drawer');
+document.getElementById('drawerHandle').addEventListener('click', () => {
+  drawer.classList.toggle('drawer-open');
+});
+
+function updateMiniBar() {
+  if (window.innerWidth > 767) return;
+  const mineral = document.getElementById('mineralSel').value;
+  const radius  = document.getElementById('radiusSl').value;
+  const mName   = MINERAL_NAMES[mineral] || '全鉱物';
+  document.getElementById('miniIcon').innerHTML = MINERAL_ICON_SVG[mineral] || MINERAL_ICON_SVG.all;
+  document.getElementById('miniInfo').textContent =
+    mName + '  ' + radius + 'km' +
+    (selLat ? '  📍' + selLat.toFixed(2) + '°N' : '  地図をタップ');
+  document.getElementById('miniSearchBtn').disabled = !selLat;
+}
+
 // ── 地図クリック ───────────────────────────────────────
 map.on('click', e => {
   selLat = parseFloat(e.latlng.lat.toFixed(5));
@@ -322,6 +430,7 @@ map.on('click', e => {
       iconSize: [0, 0], className: ''
     })
   }).addTo(map);
+  updateMiniBar();
 });
 
 // ── 検索 ─────────────────────────────────────────────
@@ -397,6 +506,7 @@ function copyUrl() {
   }).addTo(map);
 
   map.setView([selLat, selLon], 9);
+  updateMiniBar();
   doSearch();
 })();
 
@@ -424,6 +534,8 @@ function mineralBreakdown(row, labels) {
 
 function renderResults(data) {
   document.getElementById('loadingMsg').style.display = 'none';
+  // モバイル: 検索完了でドロワーを自動展開
+  if (window.innerWidth <= 767) drawer.classList.add('drawer-open');
 
   const hdr     = document.getElementById('resultHdr');
   const list    = document.getElementById('resultList');
@@ -517,6 +629,10 @@ function renderResults(data) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !document.getElementById('searchBtn').disabled) doSearch();
 });
+
+// 鉱物・半径が変わったらミニバーを更新（モバイル）
+document.getElementById('mineralSel').addEventListener('change', updateMiniBar);
+document.getElementById('radiusSl').addEventListener('input', updateMiniBar);
 </script>
 </body>
 </html>
