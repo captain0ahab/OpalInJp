@@ -290,7 +290,25 @@ select:focus { outline: none; border-color: #5dade2; }
   box-shadow: 0 3px 14px rgba(0,0,0,.5);
 }
 .leaflet-popup-tip { background: #0d1b2e; }
-.leaflet-popup-content { font-size: 0.81rem; line-height: 1.65; min-width: 220px; }
+.leaflet-popup-close-button {
+  color: #7fb3d3 !important;
+  font-size: 1.4rem !important;
+  width: 32px !important; height: 32px !important;
+  top: 4px !important; right: 4px !important;
+  line-height: 32px !important;
+}
+.leaflet-popup-content {
+  font-size: 0.81rem; line-height: 1.65; min-width: 220px;
+  max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.p-close {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 8px; background: #1e3a5f; color: #7fb3d3;
+  border: 1px solid #2d6a9f; border-radius: 4px;
+  cursor: pointer; font-size: 0.82rem; text-align: center;
+  transition: background 0.15s;
+}
+.p-close:hover { background: #2d5a8e; color: #e8e8e8; }
 .p-score { font-size: 1.1rem; font-weight: bold; }
 .p-divider { border-top: 1px solid #1e3a5f; margin: 6px 0; }
 .p-minerals { font-size: 0.73rem; color: #8baabf; line-height: 1.7; }
@@ -739,8 +757,13 @@ function renderResults(data) {
       '<div class="p-divider"></div>' +
       '<div class="p-formation"><strong>💡 生成プロセス:</strong><br>' +
       (MINERAL_FORMATION[mineral] || MINERAL_FORMATION.all) + '</div>' +
-      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>',
-      { maxWidth: 300 }
+      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>' +
+      '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>',
+      {
+        maxWidth: 280,
+        autoPanPaddingTopLeft:     L.point(10, 10),
+        autoPanPaddingBottomRight: L.point(10, 90)
+      }
     );
 
     resultLayer.addLayer(marker);
