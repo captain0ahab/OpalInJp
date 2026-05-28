@@ -326,6 +326,63 @@ select:focus { outline: none; border-color: #5dade2; }
 .mineral-info-icon svg { width: 28px; height: 28px; }
 .mineral-info-text { font-size: 0.71rem; color: #a9cce3; line-height: 1.6; }
 .mineral-info-text b { color: #5dade2; }
+
+/* ── レイヤー切り替えセクション ── */
+.layer-section {
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid #1e3a5f;
+  flex-shrink: 0;
+}
+.layer-section-label {
+  font-size: 0.69rem; color: #8baabf;
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px;
+}
+.layer-btns { display: flex; gap: 6px; }
+.btn-layer {
+  flex: 1; padding: 7px 4px;
+  background: #1e3a5f; color: #4a6fa5;
+  border: 1px solid #2d6a9f; border-radius: 4px;
+  cursor: pointer; font-size: 0.8rem; transition: background 0.15s;
+}
+.btn-layer.active { background: #1e4a7a; color: #e8e8e8; border-color: #5dade2; }
+.btn-layer:hover  { background: #2d5a8e; color: #e8e8e8; }
+
+/* Leaflet ツールチップ（ダークテーマ） */
+.leaflet-tooltip {
+  background: #0d1b2e; color: #e8e8e8;
+  border: 1px solid #2d6a9f; border-radius: 4px;
+  font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+  font-size: 0.78rem; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+}
+.leaflet-tooltip-top::before  { border-top-color:    #2d6a9f !important; }
+.leaflet-tooltip-bottom::before { border-bottom-color: #2d6a9f !important; }
+
+/* 既知産地・伝説ポップアップ */
+.p-locality-name { font-size: 1rem; font-weight: bold; color: #f0b429; margin-bottom: 4px; }
+.p-legend-title  { font-size: 1rem; font-weight: bold; color: #f39c12; margin-bottom: 6px; }
+.p-legend-text   { font-size: 0.78rem; color: #d5dbdb; line-height: 1.75; }
+
+/* スコア根拠 */
+.p-rationale-title {
+  font-size: 0.75rem; font-weight: bold; color: #5dade2;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 5px;
+}
+.p-rationale { font-size: 0.77rem; color: #c8d8e8; line-height: 1.75; }
+.p-rationale b { color: #e8e8e8; }
+.p-breakdown { margin-top: 6px; }
+.p-breakdown summary {
+  font-size: 0.72rem; color: #7fb3d3; cursor: pointer;
+  list-style: none; padding: 2px 0;
+}
+.p-breakdown summary::-webkit-details-marker { display: none; }
+.p-breakdown summary::before { content: '▶ '; font-size: 0.65rem; }
+details[open] .p-breakdown summary::before { content: '▼ '; }
+
+@media (max-width: 767px) {
+  .layer-section { display: none; }
+  .sidebar.drawer-open .layer-section { display: block; padding: 6px 12px 8px; }
+}
 </style>
 </head>
 <body>
@@ -394,6 +451,19 @@ select:focus { outline: none; border-color: #5dade2; }
       <button class="btn-copy" id="copyBtn" onclick="copyUrl()" style="display:none">
         🔗 このURLをコピー
       </button>
+    </div>
+
+    <!-- レイヤー切り替え -->
+    <div class="layer-section">
+      <div class="layer-section-label">地図レイヤー</div>
+      <div class="layer-btns">
+        <button class="btn-layer active" id="btnLocalityLayer" onclick="toggleLayer('locality')">
+          ⭐ 既知産地
+        </button>
+        <button class="btn-layer active" id="btnLegendLayer" onclick="toggleLayer('legend')">
+          📜 伝説・逸話
+        </button>
+      </div>
     </div>
 
     <div class="result-panel">
@@ -748,12 +818,12 @@ function renderResults(data) {
       ' <span style="font-size:0.8rem;color:#8baabf">(' + mName + ')</span><br>' +
       '📍 調査地点から <b>' + (row.dist_km || '?') + ' km</b>' +
       (tokyoStr ? '&ensp;' + tokyoStr : '') + '<br>' +
-      '🪨 ' + (row.lithology_ja || '—') + '<br>' +
-      '📅 ' + (row.formationage_ja || '—') + '<br>' +
-      '断層近接: ' + (row.near_fault ? '<span style="color:#e74c3c">○</span>' : '×') + '<br>' +
-      (row.score_hydrothermal > 0 ? '熱水変質スコア: <b>' + row.score_hydrothermal.toFixed(1) + '</b><br>' : '') +
       '<div class="p-divider"></div>' +
-      '<div class="p-minerals">' + (breakdown || '—') + '</div>' +
+      '<div class="p-rationale-title">📊 スコアの根拠</div>' +
+      '<div class="p-rationale">' + buildRationale(row, mineral) + '</div>' +
+      '<details class="p-breakdown"><summary>スコア内訳（数値）</summary>' +
+      '<div class="p-minerals" style="margin-top:4px">' + (breakdown || '—') + '</div>' +
+      '</details>' +
       '<div class="p-divider"></div>' +
       '<div class="p-formation"><strong>💡 生成プロセス:</strong><br>' +
       (MINERAL_FORMATION[mineral] || MINERAL_FORMATION.all) + '</div>' +
@@ -792,6 +862,220 @@ function setRadius(km) {
   syncRadiusPresets(km);
   updateMiniBar();
 }
+
+// ── スコア根拠（自然言語）────────────────────────────────────
+function buildRationale(row, mineral) {
+  const lith = (row.lithology_ja    || '').trim();
+  const age  = (row.formationage_ja || '').trim();
+  const hs   = row.score_hydrothermal || 0;
+  const ls   = row.score_locality     || 0;
+  const lines = [];
+
+  // ① 岩種
+  const LITH_DESC = {
+    'デイサイト':    '酸性の火山岩で、熱水による珪酸沈殿が起こりやすく、オパール・金・蛍石の母岩として好適です',
+    '流紋岩':       '高珪酸の火山岩で、熱水変質によりオパールや金が形成されやすい岩種です',
+    '花崗岩':       '深成岩で、冷却時にペグマタイト・熱水脈を形成して水晶や金を濃集します',
+    'ペグマタイト':  '花崗岩の最終結晶に由来する粗粒岩で、水晶の産地として特に重要です',
+    '蛇紋岩':       '超塩基性岩が変質した岩で、高圧低温変成作用によって翡翠を伴うことがあります',
+    'スカルン':      '花崗岩と石灰岩の接触交代帯で、ガーネット・磁鉄鉱・蛍石が多産します',
+    'ホルンフェルス': '花崗岩との接触変成帯で、スカルン型鉱物が含まれることがあります',
+    '結晶片岩':     '高圧変成岩でガーネット・藍晶石・翡翠などを含みます',
+    '片麻岩':       '高温高圧変成岩で、石英・ガーネット等を含むことがあります',
+    '安山岩':       '中性の火山岩で、熱水鉱脈が発達した場合に金・銀・砂鉄が濃集します',
+    '玄武岩':       '塩基性火山岩で磁鉄鉱を多く含み、砂鉄として川底に濃集しやすいです',
+    '珪質':        '珪酸が集積した地層で、熱水変質によりオパール等の珪質鉱物が産出します',
+    'チャート':     '珪酸微化石が固化した岩石で、変質によりオパールや輝安鉱を伴うことがあります',
+    '凝灰岩':       '火山灰が固まった岩石で、熱水変質によりオパールや金が沈殿することがあります',
+    '閃緑岩':       '深成岩の一種で、金・水晶を含む熱水脈を伴うことがあります',
+    '砂岩':        '砂礫が固まった堆積岩です。上流の鉱床から金が運ばれて砂金として集積することがあります',
+  };
+
+  // ② 年代
+  const AGE_DESC = {
+    '完新世':  '現在も続く火山・温泉活動を含む最新期で、熱水変質が今も進行中です',
+    '更新世':  '第四紀の火山活動が盛んな時期で、多くの温泉・熱水鉱床が形成されました',
+    '鮮新世':  '火山活動が活発で珪化帯や金銀鉱床が形成されやすかった時代です',
+    '中新世':  '日本の火山・熱水鉱床形成のピーク期で、砂金・オパール・輝安鉱の主産地がこの時代に形成されました',
+    '漸新世':  '古第三紀の火成活動期で、一部に熱水鉱脈が形成されました',
+    '白亜紀':  '大規模な花崗岩の貫入活動期で、スカルン・ペグマタイトが日本各地に形成されました',
+    'ジュラ紀': '付加体が発達し高圧変成作用が起こった時代で、翡翠の生成時代として重要です',
+    '三畳紀':  '変成岩・蛇紋岩帯が形成された時代で、翡翠やガーネットの母岩が生成されました',
+    '古生代':  '付加体・変成帯が広く分布し、変成鉱物の産地が多くあります',
+  };
+
+  let lithText = null;
+  for (const [kw, desc] of Object.entries(LITH_DESC)) {
+    if (lith.includes(kw)) { lithText = desc; break; }
+  }
+  if (lith && lith !== '—') {
+    lines.push('🪨 <b>' + lith + '</b>' +
+      (lithText ? '：' + lithText + '。' : '。'));
+  }
+
+  let ageText = null;
+  for (const [kw, desc] of Object.entries(AGE_DESC)) {
+    if (age.includes(kw)) { ageText = desc; break; }
+  }
+  if (age && age !== '—') {
+    lines.push('📅 地質年代は<b>' + age + '</b>' +
+      (ageText ? '：' + ageText + '。' : '。'));
+  }
+
+  if (row.near_fault) {
+    lines.push('⚡ <b>断層帯の近く（5km以内）</b>：断層沿いを流れる熱水が鉱物成分を濃集させる鉱脈が発達しやすい環境です。');
+  }
+
+  if (hs >= 3) {
+    lines.push('🌋 <b>完新世火山岩域の内部</b>：現役の火山・温泉帯の中心で、今も続く熱水変質が最も強い地域です。');
+  } else if (hs >= 2) {
+    lines.push('🌋 <b>完新世火山岩から5km圏内</b>：現役の温泉・火山帯に近く、熱水変質の影響が強い地域です。');
+  } else if (hs >= 1) {
+    lines.push('🔥 <b>完新世火山岩から10km圏内</b>：比較的新しい火山活動の周辺に位置します。');
+  }
+
+  if (ls > 0 && row.nearest_locality) {
+    lines.push('⭐ <b>既知産地近接</b>：' + row.nearest_locality + 'の産出記録に近い地点です。');
+  }
+
+  return lines.length > 0 ? lines.join('<br>') : '地質図データに基づいてスコアを算出しました。';
+}
+
+// ── 鉱物カラー（レイヤーマーカー用）───────────────────────────
+const MINERAL_COLORS = {
+  all:'#2980b9', opal:'#e74c3c', gold:'#f39c12', jade:'#27ae60',
+  quartz:'#9b59b6', garnet:'#c0392b', magnetite:'#95a5a6',
+  fluorite:'#1abc9c', stibnite:'#2c3e50', rhodochrosite:'#e91e63'
+};
+
+// ── 伝説・逸話データ ─────────────────────────────────────────
+const LEGEND_SPOTS = [
+  { lat:37.04, lon:137.86, name:'奴奈川姫の翡翠伝説', mineral:'翡翠', era:'縄文〜古代',
+    text:'糸魚川に降り立った大国主命が、姫川の翡翠を身につけた奴奈川姫に求婚したという古事記の記述。縄文時代から翡翠を産出した小滝川一帯は「翡翠の女神」が宿る聖地として崇められてきた。現在も日本海岸に翡翠の転石が打ち上げられ、幸運を呼ぶ石として知られる。' },
+  { lat:38.03, lon:138.24, name:'佐渡・黄金島伝説', mineral:'金銀', era:'江戸時代',
+    text:'江戸時代、相川金山は天領として徳川幕府の財政を支えた。地元には「金を掘り尽くすと島が沈む」という伝説が残り、採掘を控えた時期もあったという。最盛期には年間400kgを超える金を産出し、「黄金の島」と謳われた。' },
+  { lat:38.91, lon:141.10, name:'奥州藤原氏・黄金文化の伝説', mineral:'砂金', era:'平安〜鎌倉時代',
+    text:'奥州藤原氏が支配した平泉は、北上川流域の砂金で栄えた黄金文化の中心地。中尊寺金色堂に使われた金は北上川産の砂金とされる。義経を匿ったことで知られる藤原秀衡の時代、「黄金花咲く」という噂が都にまで届いたと伝わる。' },
+  { lat:35.78, lon:138.82, name:'甲州水晶・魔法の鏡伝説', mineral:'水晶', era:'中世',
+    text:'山梨県甲州は古来から水晶の名産地。武田信玄が軍配に使った「信玄の水晶玉」は一族の守り神とされた。「乙女鉱山の水晶を枕の下に置くと未来が見える」という言い伝えが今も残り、修験道の修行者がこの地を訪れたという記録がある。' },
+  { lat:35.37, lon:132.55, name:'出雲オパール・虹玉の神話', mineral:'オパール', era:'古代',
+    text:'出雲市多伎町で産出するオパールは古来「虹玉」と呼ばれた。出雲神話では「スサノオが天照大神に挑んだ際、宝玉を交換した」という記述があり、この宝玉が多伎のオパールではないかという説がある。虹色に輝く石は神の贈り物として大社に奉納された。' },
+  { lat:35.47, lon:132.96, name:'たたら製鉄と砂鉄の神 鬼伝説', mineral:'砂鉄', era:'中世',
+    text:'島根県奥出雲のたたら製鉄は「砂鉄を喰う鬼」伝説と結びついている。製鉄の神・金屋子神は白鷺に乗ってこの地に降り立ったとされ、「たたら場の周囲に白鷺が来ると豊作」という言い伝えがある。砂鉄を採るため山を切り崩す行為を「山を傷つける」として恐れた職人たちの話が多く残る。' },
+  { lat:34.27, lon:135.87, name:'天川村・ザクロ石と龍神伝説', mineral:'ザクロ石', era:'古代〜中世',
+    text:'奈良県天川村は大峯山系の修験道の聖地。天川弁財天はこの地に宿り、天ノ川周辺で採れる赤いザクロ石は「龍の血」とも「弁財天の涙」とも呼ばれた。修験者はこの石を護符として持ち歩き、魔除けにしたという伝承がある。' },
+  { lat:37.47, lon:140.58, name:'神俣鉱山・紫蛍石と鬼火伝説', mineral:'蛍石', era:'近世',
+    text:'福島県田村市の神俣鉱山では美しい紫色の蛍石が産出する。夜間、坑道入り口付近で青白く光る「鬼火」が見えると言い伝えられており、これが蛍石の紫外線蛍光現象であったことが後に科学的に解明された。「光る石の出る山には鉱脈あり」という採掘師の格言が語り継がれている。' },
+  { lat:33.78, lon:133.14, name:'市ノ川・輝安鉱 龍の髭伝説', mineral:'輝安鉱', era:'近世〜明治',
+    text:'愛媛県西条市市ノ川鉱山は世界最高品質の輝安鉱産地。地元では銀色に輝く針状結晶を「龍の髭」と呼び、山の神を怒らせると鉱山が崩れると言い伝えられてきた。明治時代に外国人鉱物学者が訪れ「世界で最も美しい鉱物産地」と称賛した記録がある。' },
+  { lat:36.12, lon:139.11, name:'長瀞・龍神と縄文の祭祀石', mineral:'ザクロ石', era:'縄文〜古代',
+    text:'埼玉県秩父郡長瀞の岩畳（結晶片岩）は「地球の窓」と呼ばれる天然記念物。縄文人はこの地で赤や黒のガーネット（ザクロ石）を採取し、祭祀道具を作ったと考えられている。荒川の急流が岩を磨き続け、石の神様「竜神」が宿るとして舟下りで厄払いをする習慣が江戸時代から続く。' },
+  { lat:35.09, lon:132.43, name:'石見銀山・錬金術師の伝説', mineral:'金銀', era:'戦国〜江戸時代',
+    text:'島根県大田市の石見銀山はかつてアジア最大の銀山で、世界銀生産量の約1/3を占めた時代もあった。「銀を金に変えられる石がある」という伝説が戦国時代に流布し、毛利氏・大内氏・尼子氏が争奪戦を繰り広げた。坑夫たちは神様への祈りを欠かさず、無事の帰還を願った。' },
+  { lat:34.90, lon:138.76, name:'土肥鉱山・インカローズのバラ色伝説', mineral:'菱マンガン鉱', era:'江戸〜近代',
+    text:'静岡県伊豆市土肥鉱山はバラ色に輝く菱マンガン鉱（インカローズ）の銘産地。江戸時代の坑夫たちはこの石を「伊豆の血の石」と呼び、深い場所で採れるほど色が濃くなることから「山の心臓に近い」と信じた。近くの土肥温泉は金山採掘で掘り当てた地下水が源泉とも言われる。' },
+  { lat:33.27, lon:131.37, name:'湯布院・由布岳の神の涙', mineral:'オパール', era:'江戸時代',
+    text:'大分県湯布院の由布岳麓では透明度の高いハイアライト（玉滴石）オパールが産出する。江戸時代の記録に「由布の山から光る水玉が降る」という記述があり、火山の噴気口付近に形成された球状オパールのことと考えられている。地元では「由布岳の神の涙」として珍重された。' },
+  { lat:35.01, lon:134.83, name:'生野銀山・徳川埋蔵金伝説', mineral:'金銀', era:'江戸末期',
+    text:'兵庫県朝来市の生野銀山は室町時代から採掘が続く日本最古の鉱山の一つ。幕府崩壊の混乱の中で「生野鉱山の奥深くに徳川の埋蔵金が隠された」という伝説が生まれた。複数の坑道が未だ調査されておらず、地元では今もロマンとして語り継がれる。' },
+  { lat:38.73, lon:140.61, name:'鳴子温泉・光る石の予言伝説', mineral:'オパール', era:'江戸時代',
+    text:'宮城県大崎市鳴子は江戸時代から知られる温泉地。熱水変質が激しい一帯では虹色に輝く珪化木やオパールが産出する。「鳴子の神様が石に魂を込めた」として、光る石を見つけた者には幸運が訪れるという言い伝えが温泉宿の帳場に残されている。' },
+];
+
+// ── 既知産地・伝説レイヤー ───────────────────────────────────
+const localityLayer = L.layerGroup().addTo(map);
+const legendLayer   = L.layerGroup().addTo(map);
+let localityVisible = true;
+let legendVisible   = true;
+
+function makeLocalityIcon(mineral, confidence) {
+  const color = MINERAL_COLORS[mineral] || '#f0b429';
+  const size  = confidence === 3 ? 28 : confidence === 2 ? 22 : 17;
+  const glow  = confidence === 3 ? 5  : confidence === 2 ? 3  : 2;
+  return L.divIcon({
+    html: '<div style="width:' + size + 'px;height:' + size + 'px;' +
+          'display:flex;align-items:center;justify-content:center;' +
+          'font-size:' + Math.round(size * 0.8) + 'px;' +
+          'filter:drop-shadow(0 0 ' + glow + 'px ' + color + ')">⭐</div>',
+    iconSize:   [size, size],
+    iconAnchor: [size / 2, size / 2],
+    className:  ''
+  });
+}
+
+const LEGEND_ICON = L.divIcon({
+  html: '<div style="width:26px;height:26px;display:flex;align-items:center;' +
+        'justify-content:center;font-size:20px;' +
+        'filter:drop-shadow(0 0 4px #f39c12)">📜</div>',
+  iconSize:   [26, 26],
+  iconAnchor: [13, 13],
+  className:  ''
+});
+
+function renderLocalityLayer(localities) {
+  localityLayer.clearLayers();
+  localities.forEach(function(loc) {
+    const icon    = makeLocalityIcon(loc.mineral, loc.confidence);
+    const stars   = '★'.repeat(loc.confidence) + '☆'.repeat(3 - loc.confidence);
+    const gmapUrl = 'https://maps.google.com/maps?q=' + loc.lat + ',' + loc.lon;
+    const marker  = L.marker([loc.lat, loc.lon], { icon });
+    marker.bindTooltip(loc.name, { direction:'top', offset:[0, -8] });
+    marker.bindPopup(
+      '<div class="p-locality-name">⭐ ' + loc.name + '</div>' +
+      '<span style="color:#f0b429">' + stars + '</span>' +
+      ' <span style="font-size:0.78rem;color:#8baabf">信頼度 ' + loc.confidence + '/3</span><br>' +
+      '🔮 <b>' + loc.mineral_name + '</b><br>' +
+      '📋 ' + (loc.note || '—') + '<br>' +
+      '<div class="p-divider"></div>' +
+      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>' +
+      '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>',
+      { maxWidth:260, autoPanPaddingTopLeft:L.point(10,10), autoPanPaddingBottomRight:L.point(10,90) }
+    );
+    localityLayer.addLayer(marker);
+  });
+}
+
+function renderLegendLayer() {
+  legendLayer.clearLayers();
+  LEGEND_SPOTS.forEach(function(spot) {
+    const gmapUrl = 'https://maps.google.com/maps?q=' + spot.lat + ',' + spot.lon;
+    const marker  = L.marker([spot.lat, spot.lon], { icon: LEGEND_ICON });
+    marker.bindTooltip(spot.name, { direction:'top', offset:[0, -8] });
+    marker.bindPopup(
+      '<div class="p-legend-title">📜 ' + spot.name + '</div>' +
+      '<span style="color:#f39c12;font-size:0.78rem">⚒ ' + spot.mineral + '</span>' +
+      '&ensp;<span style="color:#8baabf;font-size:0.75rem">🗓 ' + spot.era + '</span><br>' +
+      '<div class="p-divider"></div>' +
+      '<div class="p-legend-text">' + spot.text + '</div>' +
+      '<div class="p-divider"></div>' +
+      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>' +
+      '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>',
+      { maxWidth:290, autoPanPaddingTopLeft:L.point(10,10), autoPanPaddingBottomRight:L.point(10,90) }
+    );
+    legendLayer.addLayer(marker);
+  });
+}
+
+function toggleLayer(type) {
+  if (type === 'locality') {
+    localityVisible = !localityVisible;
+    localityVisible ? map.addLayer(localityLayer) : map.removeLayer(localityLayer);
+    document.getElementById('btnLocalityLayer').classList.toggle('active', localityVisible);
+  } else {
+    legendVisible = !legendVisible;
+    legendVisible ? map.addLayer(legendLayer) : map.removeLayer(legendLayer);
+    document.getElementById('btnLegendLayer').classList.toggle('active', legendVisible);
+  }
+}
+
+// 既知産地をAPIから取得
+fetch('/api/localities')
+  .then(function(r) { return r.json(); })
+  .then(function(data) { renderLocalityLayer(data.localities); })
+  .catch(function() {});
+
+// 伝説・逸話レイヤーを描画
+renderLegendLayer();
 </script>
 </body>
 </html>

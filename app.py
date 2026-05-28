@@ -8,6 +8,32 @@ import json, os
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 
+from score_extras import KNOWN_LOCALITIES, haversine_km as _loc_hav
+
+_LOC_THRESHOLDS = ((20, 3.0), (50, 2.0), (100, 1.0))
+
+def _locality_score(lat, lon, mineral):
+    """既知産地との距離スコアをリアルタイム計算（上位 80 件分のみ）"""
+    if mineral == 'all':
+        loc_items = list(KNOWN_LOCALITIES.items())
+    else:
+        loc_items = [(mineral, KNOWN_LOCALITIES.get(mineral, []))]
+
+    best_score = 0.0
+    best_note  = ''
+    for m_key, locs in loc_items:
+        m_name = MINERAL_LABELS.get(m_key, m_key)
+        for name, loc_lat, loc_lon, conf, note in locs:
+            dist = _loc_hav(lat, lon, loc_lat, loc_lon)
+            for max_km, base in _LOC_THRESHOLDS:
+                if dist <= max_km:
+                    adj = base * (conf / 3.0)
+                    if adj > best_score:
+                        best_score = adj
+                        best_note  = f"{name}（{dist:.0f}km、{m_name}）"
+                    break
+    return round(best_score, 2), best_note
+
 BASE = Path(__file__).parent
 df = pd.read_csv(BASE / 'output' / 'mineral_candidates.csv', encoding='utf-8-sig')
 print(f"データ読み込み完了: {len(df):,} ポリゴン")
@@ -98,8 +124,18 @@ def search():
     top = near.nlargest(80, sort_col).copy()
     top['sort_score'] = top[sort_col].fillna(0).round(2)
 
+    # 既知産地スコアをリアルタイム計算（80 件なので十分高速）
+    loc_scores, loc_notes = [], []
+    for _, row in top.iterrows():
+        s, n = _locality_score(row['lat'], row['lon'], mineral)
+        loc_scores.append(s)
+        loc_notes.append(n)
+    top['score_locality']    = loc_scores
+    top['nearest_locality'] = loc_notes
+
     keep = ['lat', 'lon', 'dist_km', 'sort_score', 'total_score',
-            'lithology_ja', 'formationage_ja', 'near_fault', 'dist_tokyo_km']
+            'lithology_ja', 'formationage_ja', 'near_fault', 'dist_tokyo_km',
+            'score_locality', 'nearest_locality']
     keep += [c for c in mineral_score_cols if c in top.columns]
     if 'score_hydrothermal' in top.columns:
         keep.append('score_hydrothermal')
@@ -116,6 +152,24 @@ def search():
         'max_score':      float(top['sort_score'].max()),
         'mineral_labels': MINERAL_LABELS,
     })
+
+
+@app.route('/api/localities')
+def localities():
+    from score_extras import KNOWN_LOCALITIES
+    items = []
+    for mineral, locs in KNOWN_LOCALITIES.items():
+        for name, lat, lon, confidence, note in locs:
+            items.append({
+                'mineral':      mineral,
+                'mineral_name': MINERAL_LABELS.get(mineral, mineral),
+                'name':         name,
+                'lat':          lat,
+                'lon':          lon,
+                'confidence':   confidence,
+                'note':         note,
+            })
+    return jsonify({'localities': items})
 
 
 if __name__ == '__main__':
