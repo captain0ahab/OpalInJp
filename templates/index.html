@@ -347,6 +347,19 @@ select:focus { outline: none; border-color: #5dade2; }
 .btn-layer.active { background: #1e4a7a; color: #e8e8e8; border-color: #5dade2; }
 .btn-layer:hover  { background: #2d5a8e; color: #e8e8e8; }
 
+/* ── ベースマップ切り替えボタン ── */
+.basemap-btns { display: flex; flex-wrap: wrap; gap: 4px; }
+.btn-basemap {
+  flex: 1 0 calc(33% - 3px);
+  padding: 5px 3px;
+  font-size: 0.73rem; text-align: center; line-height: 1.35;
+  background: #1e3a5f; color: #4a6fa5;
+  border: 1px solid #2d6a9f; border-radius: 4px;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-basemap.active { background: #1e4a7a; color: #e8e8e8; border-color: #5dade2; }
+.btn-basemap:hover  { background: #2d5a8e; color: #e8e8e8; }
+
 /* Leaflet ツールチップ（ダークテーマ） */
 .leaflet-tooltip {
   background: #0d1b2e; color: #e8e8e8;
@@ -453,6 +466,18 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
       </button>
     </div>
 
+    <!-- ベースマップ切り替え -->
+    <div class="layer-section">
+      <div class="layer-section-label">ベースマップ</div>
+      <div class="basemap-btns">
+        <button class="btn-basemap" data-basemap="osm"       onclick="switchBasemap('osm')">OSM</button>
+        <button class="btn-basemap" data-basemap="std"       onclick="switchBasemap('std')">標準地図</button>
+        <button class="btn-basemap" data-basemap="hillshade" onclick="switchBasemap('hillshade')">陰影起伏図</button>
+        <button class="btn-basemap active" data-basemap="carto" onclick="switchBasemap('carto')">ダーク</button>
+        <button class="btn-basemap" data-basemap="esri"      onclick="switchBasemap('esri')">衛星</button>
+      </div>
+    </div>
+
     <!-- レイヤー切り替え -->
     <div class="layer-section">
       <div class="layer-section-label">地図レイヤー</div>
@@ -532,11 +557,40 @@ const MINERAL_ICON_SVG = {
 // ── 地図初期化 ─────────────────────────────────────────
 const map = L.map('map', { center:[36.5, 137.0], zoom:6 });
 
-L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
-  attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
-  maxZoom:18,
-  className:'dark-tiles'
-}).addTo(map);
+const BASEMAPS = {
+  osm: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    options: { attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom:19 }
+  },
+  std: {
+    url: 'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+    options: { attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>', maxZoom:18, className:'dark-tiles' }
+  },
+  hillshade: {
+    url: 'https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png',
+    options: { attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>', maxZoom:16 }
+  },
+  carto: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    options: { attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>', subdomains:'abcd', maxZoom:19 }
+  },
+  esri: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    options: { attribution:'Tiles &copy; Esri &mdash; Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP', maxZoom:18 }
+  }
+};
+
+let currentBaseTile = L.tileLayer(BASEMAPS.carto.url, BASEMAPS.carto.options).addTo(map);
+
+function switchBasemap(id) {
+  const cfg = BASEMAPS[id];
+  if (!cfg) return;
+  map.removeLayer(currentBaseTile);
+  currentBaseTile = L.tileLayer(cfg.url, cfg.options).addTo(map);
+  currentBaseTile.bringToBack();
+  document.querySelectorAll('.btn-basemap').forEach(b => b.classList.remove('active'));
+  document.querySelector('.btn-basemap[data-basemap="' + id + '"]').classList.add('active');
+}
 
 // 東京
 L.circleMarker([35.6895, 139.6917], {
@@ -811,13 +865,11 @@ function renderResults(data) {
     const gmapUrl   = 'https://maps.google.com/maps?q=' + row.lat + ',' + row.lon;
     const mName     = MINERAL_NAMES[mineral] || '合計';
     const breakdown = mineralBreakdown(row, data.mineral_labels);
-    const tokyoStr  = row.dist_tokyo_km ? '東京から: ' + Math.round(row.dist_tokyo_km) + ' km' : '';
 
     marker.bindPopup(
       '<span class="p-score" style="color:' + c + '">' + score.toFixed(1) + '</span>' +
       ' <span style="font-size:0.8rem;color:#8baabf">(' + mName + ')</span><br>' +
-      '📍 調査地点から <b>' + (row.dist_km || '?') + ' km</b>' +
-      (tokyoStr ? '&ensp;' + tokyoStr : '') + '<br>' +
+      '📍 調査地点から <b>' + (row.dist_km || '?') + ' km</b><br>' +
       '<div class="p-divider"></div>' +
       '<div class="p-rationale-title">📊 スコアの根拠</div>' +
       '<div class="p-rationale">' + buildRationale(row, mineral) + '</div>' +
