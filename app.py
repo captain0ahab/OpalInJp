@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import json, os
+import urllib.request, urllib.parse
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
@@ -33,6 +34,19 @@ def _locality_score(lat, lon, mineral):
                         best_note  = f"{name}（{dist:.0f}km、{m_name}）"
                     break
     return round(best_score, 2), best_note
+
+# 比重（g/cm³）→ 川での移動距離の逆数として上流参照半径を決定
+MINERAL_DENSITY = {
+    'gold': 19.3, 'magnetite': 5.2, 'stibnite': 4.6,
+    'garnet': 3.9, 'rhodochrosite': 3.7, 'jade': 3.3,
+    'fluorite': 3.2, 'quartz': 2.65, 'opal': 2.1,
+}
+
+def _density_radius(mineral):
+    """比重から上流参照半径(km)を算出: radius = 10 * (2.65 / density)"""
+    d = MINERAL_DENSITY.get(mineral, 5.0)
+    return round(10.0 * (2.65 / d), 1)
+
 
 BASE = Path(__file__).parent
 df = pd.read_csv(BASE / 'output' / 'mineral_candidates.csv', encoding='utf-8-sig')
@@ -170,6 +184,97 @@ def localities():
                 'note':         note,
             })
     return jsonify({'localities': items})
+
+
+@app.route('/api/rivers')
+def rivers_api():
+    try:
+        lat       = float(request.args['lat'])
+        lon       = float(request.args['lon'])
+        radius_km = float(request.args.get('radius_km', 20))
+        mineral   = request.args.get('mineral', 'all')
+    except (KeyError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+
+    # バウンディングボックス
+    deg   = radius_km / 111.0
+    cos_l = np.cos(np.radians(lat))
+    south, north = lat - deg, lat + deg
+    west,  east  = lon - deg / cos_l, lon + deg / cos_l
+    bbox  = f"{south:.5f},{west:.5f},{north:.5f},{east:.5f}"
+
+    query = (
+        f'[out:json][timeout:25];'
+        f'(way["waterway"~"^(river|stream)$"]({bbox}););'
+        f'out geom;'
+    )
+    try:
+        data = urllib.parse.urlencode({'data': query}).encode()
+        req  = urllib.request.Request(
+            'https://overpass-api.de/api/interpreter', data=data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            osm = json.loads(r.read().decode())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    # 比重由来の上流参照半径
+    ref_radius = _density_radius(mineral)
+
+    # 検索範囲のポリゴンを絞り込む
+    dists = haversine_vec(lat, lon, df['lat'].values, df['lon'].values)
+    near  = df[dists <= radius_km].copy()
+
+    sort_col = 'total_score' if mineral == 'all' else f'score_{mineral}'
+    if sort_col not in near.columns:
+        sort_col = 'total_score'
+
+    max_score = float(near[sort_col].max()) if len(near) > 0 else 1.0
+
+    # 各河川ウェイをスコアリング
+    features = []
+    for way in osm.get('elements', []):
+        if way.get('type') != 'way' or 'geometry' not in way:
+            continue
+        geom = way['geometry']
+        if len(geom) < 2:
+            continue
+
+        # サンプル点を最大8点に間引き
+        step    = max(1, len(geom) // 8)
+        samples = geom[::step]
+        best    = 0.0
+        for pt in samples:
+            if len(near) == 0:
+                break
+            d     = haversine_vec(pt['lat'], pt['lon'], near['lat'].values, near['lon'].values)
+            close = near.loc[d <= ref_radius, sort_col]
+            if len(close):
+                v = float(close.max())
+                if v > best:
+                    best = v
+
+        features.append({
+            'type': 'Feature',
+            'geometry': {
+                'type':        'LineString',
+                'coordinates': [[g['lon'], g['lat']] for g in geom],
+            },
+            'properties': {
+                'score':    round(best, 2),
+                'name':     way.get('tags', {}).get('name', ''),
+                'waterway': way.get('tags', {}).get('waterway', 'stream'),
+            }
+        })
+
+    return jsonify({
+        'type':       'FeatureCollection',
+        'features':   features,
+        'ref_radius': ref_radius,
+        'max_score':  max_score,
+        'mineral':    mineral,
+    })
 
 
 if __name__ == '__main__':

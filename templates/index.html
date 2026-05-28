@@ -488,6 +488,9 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
         <button class="btn-layer active" id="btnLegendLayer" onclick="toggleLayer('legend')">
           📜 伝説・逸話
         </button>
+        <button class="btn-layer" id="btnRiverLayer" onclick="toggleLayer('river')" disabled>
+          河川スコア
+        </button>
       </div>
     </div>
 
@@ -719,6 +722,9 @@ function doSearch() {
   document.getElementById('mineralInfo').style.display = 'none';
   document.getElementById('resultList').innerHTML = '';
   resultLayer.clearLayers();
+  riverLayer.clearLayers();
+  const riverBtn = document.getElementById('btnRiverLayer');
+  if (riverBtn) { riverBtn.disabled = true; riverBtn.classList.remove('active'); riverBtn.textContent = '河川スコア'; }
 
   if (radiusCircle) map.removeLayer(radiusCircle);
   radiusCircle = L.circle([selLat, selLon], {
@@ -736,6 +742,8 @@ function doSearch() {
       btn.disabled = false;
       document.getElementById('loadingMsg').style.display = 'none';
     });
+
+  fetchRivers();
 }
 
 // ── URL コピー ────────────────────────────────────────
@@ -1113,10 +1121,82 @@ function toggleLayer(type) {
     localityVisible = !localityVisible;
     localityVisible ? map.addLayer(localityLayer) : map.removeLayer(localityLayer);
     document.getElementById('btnLocalityLayer').classList.toggle('active', localityVisible);
-  } else {
+  } else if (type === 'legend') {
     legendVisible = !legendVisible;
     legendVisible ? map.addLayer(legendLayer) : map.removeLayer(legendLayer);
     document.getElementById('btnLegendLayer').classList.toggle('active', legendVisible);
+  } else if (type === 'river') {
+    riverVisible = !riverVisible;
+    riverVisible ? map.addLayer(riverLayer) : map.removeLayer(riverLayer);
+    document.getElementById('btnRiverLayer').classList.toggle('active', riverVisible);
+  }
+}
+
+// ── 河川スコアレイヤー ──────────────────────────────────────────
+const riverLayer = L.layerGroup().addTo(map);
+let riverVisible = true;
+let riverLoading = false;
+
+function renderRiverLayer(data) {
+  riverLayer.clearLayers();
+  const maxScore = data.max_score || 1;
+  const refKm    = data.ref_radius || '?';
+
+  data.features.forEach(function(f) {
+    const score = f.properties.score;
+    if (score <= 0) return;
+    const ratio  = maxScore > 0 ? score / maxScore : 0;
+    const color  = ratioColor(ratio);
+    const weight = f.properties.waterway === 'river' ? 5 : 2.5;
+    const coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+
+    const line = L.polyline(coords, {
+      color: color, weight: weight, opacity: 0.85
+    });
+
+    const name    = f.properties.name || '（名称不明）';
+    const mineral = data.mineral === 'all' ? '全鉱物' : (MINERAL_NAMES[data.mineral] || data.mineral);
+    line.bindTooltip(
+      name + '&ensp;スコア <b>' + score.toFixed(1) + '</b>' +
+      '<br><span style="font-size:0.72rem;color:#aaa">上流 ' + refKm + 'km 参照（' + mineral + ' 比重由来）</span>',
+      { sticky: true }
+    );
+    riverLayer.addLayer(line);
+  });
+
+  const btn = document.getElementById('btnRiverLayer');
+  if (btn) {
+    btn.textContent = '河川スコア';
+    btn.disabled    = false;
+    if (riverVisible) btn.classList.add('active');
+  }
+}
+
+async function fetchRivers() {
+  if (!selLat || riverLoading) return;
+  riverLoading = true;
+
+  const btn = document.getElementById('btnRiverLayer');
+  if (btn) { btn.textContent = '河川 取得中…'; btn.disabled = true; btn.classList.remove('active'); }
+  riverLayer.clearLayers();
+
+  const radius  = document.getElementById('radiusSl').value;
+  const mineral = document.getElementById('mineralSel').value;
+
+  try {
+    const resp = await fetch(
+      '/api/rivers?lat=' + selLat + '&lon=' + selLon +
+      '&radius_km=' + radius + '&mineral=' + mineral
+    );
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    renderRiverLayer(data);
+  } catch(e) {
+    console.warn('河川データ取得失敗:', e.message);
+    if (btn) { btn.textContent = '河川 取得失敗'; btn.disabled = false; }
+  } finally {
+    riverLoading = false;
   }
 }
 
