@@ -1141,23 +1141,25 @@ function renderRiverLayer(data) {
   riverLayer.clearLayers();
   const maxScore = data.max_score || 1;
   const refKm    = data.ref_radius || '?';
+  const mineral  = data.mineral === 'all' ? '全鉱物' : (MINERAL_NAMES[data.mineral] || data.mineral);
+
+  if (data.warning) console.warn('Overpass:', data.warning);
 
   data.features.forEach(function(f) {
-    const score = f.properties.score;
-    if (score <= 0) return;
-    const ratio  = maxScore > 0 ? score / maxScore : 0;
-    const color  = ratioColor(ratio);
-    const weight = f.properties.waterway === 'river' ? 5 : 2.5;
-    const coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+    const score   = f.properties.score;
+    const ratio   = (score > 0 && maxScore > 0) ? score / maxScore : 0;
+    const color   = score > 0 ? ratioColor(ratio) : '#2d4a6e';
+    const weight  = f.properties.waterway === 'river' ? 5 : 2;
+    const opacity = score > 0 ? 0.85 : 0.3;
+    const coords  = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
 
-    const line = L.polyline(coords, {
-      color: color, weight: weight, opacity: 0.85
-    });
+    const line = L.polyline(coords, { color, weight, opacity });
 
-    const name    = f.properties.name || '（名称不明）';
-    const mineral = data.mineral === 'all' ? '全鉱物' : (MINERAL_NAMES[data.mineral] || data.mineral);
+    const name = f.properties.name || '（名称不明）';
     line.bindTooltip(
-      name + '&ensp;スコア <b>' + score.toFixed(1) + '</b>' +
+      name + (score > 0
+        ? '&ensp;スコア <b>' + score.toFixed(1) + '</b>'
+        : '&ensp;<span style="color:#8baabf">スコアなし</span>') +
       '<br><span style="font-size:0.72rem;color:#aaa">上流 ' + refKm + 'km 参照（' + mineral + ' 比重由来）</span>',
       { sticky: true }
     );
