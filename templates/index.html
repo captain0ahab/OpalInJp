@@ -604,6 +604,9 @@ L.circleMarker([35.6895, 139.6917], {
 let selLat = null, selLon = null;
 let pinMarker = null, radiusCircle = null;
 const resultLayer = L.layerGroup().addTo(map);
+const riverLayer  = L.layerGroup().addTo(map);
+let riverVisible = true;
+let riverLoading = false;
 
 // ── モバイルドロワー制御 ──────────────────────────────────────
 const drawer = document.getElementById('drawer');
@@ -1133,9 +1136,6 @@ function toggleLayer(type) {
 }
 
 // ── 河川スコアレイヤー ──────────────────────────────────────────
-const riverLayer = L.layerGroup().addTo(map);
-let riverVisible = true;
-let riverLoading = false;
 
 function renderRiverLayer(data) {
   riverLayer.clearLayers();
