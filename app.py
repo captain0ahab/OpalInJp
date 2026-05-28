@@ -212,7 +212,11 @@ def rivers_api():
         data = urllib.parse.urlencode({'data': query}).encode()
         req  = urllib.request.Request(
             'https://overpass-api.de/api/interpreter', data=data,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent':   'OpalInJp/1.0 (mineral prospecting map)',
+                'Accept':       'application/json',
+            }
         )
         with urllib.request.urlopen(req, timeout=30) as r:
             osm = json.loads(r.read().decode())
