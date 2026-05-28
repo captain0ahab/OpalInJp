@@ -211,7 +211,7 @@ print("既知産地スコア計算中...")
 from score_extras import KNOWN_LOCALITIES
 
 def _locality_score_batch(lats_arr, lons_arr, mineral_key,
-                           thresholds=((20, 3.0), (50, 2.0), (100, 1.0))):
+                           thresholds=((20, 3.0), (50, 2.0))):
     """全ポリゴンに対して既知産地スコアをベクトル計算"""
     locs = KNOWN_LOCALITIES.get(mineral_key, [])
     n    = len(lats_arr)

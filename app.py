@@ -10,7 +10,7 @@ app.config['JSON_AS_ASCII'] = False
 
 from score_extras import KNOWN_LOCALITIES, haversine_km as _loc_hav
 
-_LOC_THRESHOLDS = ((20, 3.0), (50, 2.0), (100, 1.0))
+_LOC_THRESHOLDS = ((20, 3.0), (50, 2.0))
 
 def _locality_score(lat, lon, mineral):
     """既知産地との距離スコアをリアルタイム計算（上位 80 件分のみ）"""
