@@ -217,20 +217,28 @@ def rivers_api():
         with urllib.request.urlopen(req, timeout=30) as r:
             osm = json.loads(r.read().decode())
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Overpass 失敗時は空結果を返す（500 にしない）
+        return jsonify({
+            'type': 'FeatureCollection', 'features': [],
+            'ref_radius': _density_radius(mineral), 'max_score': 1.0,
+            'mineral': mineral, 'warning': str(e)
+        })
 
     # 比重由来の上流参照半径
     ref_radius = _density_radius(mineral)
 
-    # 検索範囲のポリゴンを絞り込む
+    # 検索範囲のポリゴンを絞り込む（numpy 配列で持つことで pandas インデックス問題を回避）
     dists = haversine_vec(lat, lon, df['lat'].values, df['lon'].values)
-    near  = df[dists <= radius_km].copy()
+    mask  = dists <= radius_km
+    near_lats   = df['lat'].values[mask]
+    near_lons   = df['lon'].values[mask]
 
     sort_col = 'total_score' if mineral == 'all' else f'score_{mineral}'
-    if sort_col not in near.columns:
+    if sort_col not in df.columns:
         sort_col = 'total_score'
+    near_scores = df[sort_col].values[mask]
 
-    max_score = float(near[sort_col].max()) if len(near) > 0 else 1.0
+    max_score = float(near_scores.max()) if len(near_scores) > 0 else 1.0
 
     # 各河川ウェイをスコアリング
     features = []
@@ -246,12 +254,12 @@ def rivers_api():
         samples = geom[::step]
         best    = 0.0
         for pt in samples:
-            if len(near) == 0:
+            if len(near_lats) == 0:
                 break
-            d     = haversine_vec(pt['lat'], pt['lon'], near['lat'].values, near['lon'].values)
-            close = near.loc[d <= ref_radius, sort_col]
-            if len(close):
-                v = float(close.max())
+            d    = haversine_vec(pt['lat'], pt['lon'], near_lats, near_lons)
+            pmask = d <= ref_radius
+            if pmask.any():
+                v = float(near_scores[pmask].max())
                 if v > best:
                     best = v
 
