@@ -743,7 +743,14 @@ function doSearch() {
         '&radius_km=' + radius + '&mineral=' + mineral)
     .then(r => r.json())
     .then(renderResults)
-    .catch(err => alert('エラー: ' + err.message))
+    .catch(err => {
+      const msg = (err.message === 'Failed to fetch')
+        ? '通信エラー：インターネット接続を確認してください'
+        : 'エラー: ' + err.message;
+      const hdr = document.getElementById('resultHdr');
+      hdr.innerHTML = '<span style="color:#e74c3c">' + msg + '</span>';
+      hdr.style.display = 'block';
+    })
     .finally(() => {
       btn.disabled = false;
       document.getElementById('loadingMsg').style.display = 'none';
