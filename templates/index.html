@@ -605,8 +605,8 @@ let selLat = null, selLon = null;
 let pinMarker = null, radiusCircle = null;
 const resultLayer = L.layerGroup().addTo(map);
 const riverLayer  = L.layerGroup().addTo(map);
-let riverVisible = true;
-let riverLoading = false;
+let riverVisible        = true;
+let riverAbortController = null;
 
 // ── モバイルドロワー制御 ──────────────────────────────────────
 const drawer = document.getElementById('drawer');
@@ -1175,8 +1175,12 @@ function renderRiverLayer(data) {
 }
 
 async function fetchRivers() {
-  if (!selLat || riverLoading) return;
-  riverLoading = true;
+  if (!selLat) return;
+
+  // 前のリクエストをキャンセル
+  if (riverAbortController) riverAbortController.abort();
+  riverAbortController = new AbortController();
+  const signal = riverAbortController.signal;
 
   const btn = document.getElementById('btnRiverLayer');
   if (btn) { btn.textContent = '河川 取得中…'; btn.disabled = true; btn.classList.remove('active'); }
@@ -1188,17 +1192,17 @@ async function fetchRivers() {
   try {
     const resp = await fetch(
       '/api/rivers?lat=' + selLat + '&lon=' + selLon +
-      '&radius_km=' + radius + '&mineral=' + mineral
+      '&radius_km=' + radius + '&mineral=' + mineral,
+      { signal }
     );
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     renderRiverLayer(data);
   } catch(e) {
+    if (e.name === 'AbortError') return;  // キャンセル済み：何もしない
     console.warn('河川データ取得失敗:', e.message);
     if (btn) { btn.textContent = '河川 取得失敗'; btn.disabled = false; }
-  } finally {
-    riverLoading = false;
   }
 }
 
