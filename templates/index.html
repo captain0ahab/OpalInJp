@@ -159,7 +159,25 @@ select:focus { outline: none; border-color: #5dade2; }
     box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
   }
 
-  .sidebar.drawer-open { height: 58vh; } /* 展開状態 */
+  .sidebar.drawer-open {
+    height: 58vh;
+    overflow-y: auto;   /* ドロワー全体をスクロール可能に */
+  }
+
+  /* ハンドルはスクロール時も最上部に固定 */
+  .sidebar.drawer-open .drawer-handle {
+    position: sticky;
+    top: 0;
+    background: #12122a;
+    z-index: 2;
+  }
+
+  /* 結果パネルはドロワースクロールに任せる */
+  .sidebar.drawer-open .result-panel {
+    overflow-y: visible;
+    flex: none;
+    min-height: 200px;
+  }
 
   /* ── ドラッグハンドル ── */
   .drawer-handle {
