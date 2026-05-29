@@ -488,7 +488,7 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
         <button class="btn-layer active" id="btnLegendLayer" onclick="toggleLayer('legend')">
           📜 伝説・逸話
         </button>
-        <button class="btn-layer" id="btnRiverLayer" onclick="toggleLayer('river')" disabled>
+        <button class="btn-layer" id="btnRiverLayer" onclick="onRiverLayerBtn()" disabled>
           河川スコア
         </button>
       </div>
@@ -606,6 +606,7 @@ let pinMarker = null, radiusCircle = null;
 const resultLayer = L.layerGroup().addTo(map);
 const riverLayer  = L.layerGroup().addTo(map);
 let riverVisible        = true;
+let riverFetched        = false;
 let riverAbortController = null;
 
 // ── モバイルドロワー制御 ──────────────────────────────────────
@@ -726,8 +727,10 @@ function doSearch() {
   document.getElementById('resultList').innerHTML = '';
   resultLayer.clearLayers();
   riverLayer.clearLayers();
+  riverFetched = false;
+  if (riverAbortController) { riverAbortController.abort(); riverAbortController = null; }
   const riverBtn = document.getElementById('btnRiverLayer');
-  if (riverBtn) { riverBtn.disabled = true; riverBtn.classList.remove('active'); riverBtn.textContent = '河川スコア'; }
+  if (riverBtn) { riverBtn.disabled = false; riverBtn.classList.remove('active'); riverBtn.textContent = '河川スコア'; }
 
   if (radiusCircle) map.removeLayer(radiusCircle);
   radiusCircle = L.circle([selLat, selLon], {
@@ -745,8 +748,6 @@ function doSearch() {
       btn.disabled = false;
       document.getElementById('loadingMsg').style.display = 'none';
     });
-
-  fetchRivers();
 }
 
 // ── URL コピー ────────────────────────────────────────
@@ -1166,11 +1167,21 @@ function renderRiverLayer(data) {
     riverLayer.addLayer(line);
   });
 
+  riverFetched = true;
   const btn = document.getElementById('btnRiverLayer');
   if (btn) {
     btn.textContent = '河川スコア';
     btn.disabled    = false;
-    if (riverVisible) btn.classList.add('active');
+    riverVisible = true;
+    btn.classList.add('active');
+  }
+}
+
+function onRiverLayerBtn() {
+  if (!riverFetched) {
+    fetchRivers();
+  } else {
+    toggleLayer('river');
   }
 }
 
