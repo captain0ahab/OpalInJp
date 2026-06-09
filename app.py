@@ -289,6 +289,87 @@ def rivers_api():
     })
 
 
+@app.route('/api/overlays')
+def overlays_api():
+    try:
+        lat       = float(request.args['lat'])
+        lon       = float(request.args['lon'])
+        radius_km = float(request.args.get('radius_km', 20))
+    except (KeyError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+
+    deg   = radius_km / 111.0
+    cos_l = np.cos(np.radians(lat))
+    south, north = lat - deg, lat + deg
+    west,  east  = lon - deg / cos_l, lon + deg / cos_l
+    bbox = f"{south:.5f},{west:.5f},{north:.5f},{east:.5f}"
+
+    query = (
+        f'[out:json][timeout:30];'
+        f'('
+        f'relation["boundary"="national_park"]({bbox});'
+        f'relation["boundary"="protected_area"]({bbox});'
+        f'node["natural"="hot_spring"]({bbox});'
+        f'node["natural"="fumarole"]({bbox});'
+        f'node["historic"="mine"]({bbox});'
+        f'way["historic"="mine"]({bbox});'
+        f'node["man_made"="mineshaft"]({bbox});'
+        f');'
+        f'out center tags;'
+    )
+    try:
+        data_enc = urllib.parse.urlencode({'data': query}).encode()
+        req = urllib.request.Request(
+            'https://overpass-api.de/api/interpreter', data=data_enc,
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent':   'OpalInJp/1.0 (mineral prospecting map)',
+                'Accept':       'application/json',
+            }
+        )
+        with urllib.request.urlopen(req, timeout=35) as r:
+            osm = json.loads(r.read().decode())
+    except Exception as e:
+        return jsonify({'parks': [], 'hotsprings': [], 'mines': [], 'warning': str(e)})
+
+    parks, hotsprings, mines = [], [], []
+    for el in osm.get('elements', []):
+        tags  = el.get('tags', {})
+        etype = el.get('type', '')
+        name  = tags.get('name:ja') or tags.get('name') or ''
+
+        if etype == 'node':
+            lat_el, lon_el = el.get('lat'), el.get('lon')
+        elif 'center' in el:
+            lat_el, lon_el = el['center']['lat'], el['center']['lon']
+        else:
+            continue
+
+        boundary = tags.get('boundary', '')
+        if boundary in ('national_park', 'protected_area'):
+            pc = int(tags.get('protect_class', 0) or 0)
+            if boundary == 'national_park' or pc in (2, 3, 4, 5):
+                if boundary == 'national_park' or pc == 2:
+                    park_type = '国立公園'
+                elif pc == 3:
+                    park_type = '国定公園'
+                else:
+                    park_type = '自然公園'
+                parks.append({'name': name, 'lat': lat_el, 'lon': lon_el, 'park_type': park_type})
+            continue
+
+        natural = tags.get('natural', '')
+        if natural in ('hot_spring', 'fumarole'):
+            hotsprings.append({'name': name or ('温泉' if natural == 'hot_spring' else '噴気孔'), 'lat': lat_el, 'lon': lon_el})
+            continue
+
+        if tags.get('historic') == 'mine' or tags.get('man_made') == 'mineshaft':
+            mine_type = '旧鉱山' if tags.get('historic') == 'mine' else '坑道'
+            mines.append({'name': name or mine_type, 'lat': lat_el, 'lon': lon_el, 'mine_type': mine_type})
+
+    return jsonify({'parks': parks, 'hotsprings': hotsprings, 'mines': mines})
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

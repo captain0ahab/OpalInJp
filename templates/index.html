@@ -510,6 +510,17 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
           河川スコア
         </button>
       </div>
+      <div class="layer-btns" style="margin-top:5px">
+        <button class="btn-layer" id="btnParkLayer" onclick="onParkLayerBtn()" disabled>
+          🚫 保護区
+        </button>
+        <button class="btn-layer" id="btnHotspringLayer" onclick="onOverlayBtn('hotspring')" disabled>
+          ♨ 温泉
+        </button>
+        <button class="btn-layer" id="btnMineLayer" onclick="onOverlayBtn('mine')" disabled>
+          ⛏ 鉱山跡
+        </button>
+      </div>
     </div>
 
     <div class="result-panel">
@@ -750,6 +761,27 @@ function doSearch() {
   const riverBtn = document.getElementById('btnRiverLayer');
   if (riverBtn) { riverBtn.disabled = false; riverBtn.classList.remove('active'); riverBtn.textContent = '河川スコア'; }
 
+  // オーバーレイリセット
+  overlayFetched = false;
+  overlayData    = null;
+  parkLayer.clearLayers();
+  hotspringLayer.clearLayers();
+  mineLayer.clearLayers();
+  if (map.hasLayer(hotspringLayer)) map.removeLayer(hotspringLayer);
+  if (map.hasLayer(mineLayer))      map.removeLayer(mineLayer);
+  hotspringVisible = false;
+  mineVisible      = false;
+  parkVisible      = true;
+  ['btnParkLayer','btnHotspringLayer','btnMineLayer'].forEach(function(id) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = true;
+    btn.classList.remove('active');
+  });
+  document.getElementById('btnParkLayer').textContent      = '🚫 保護区';
+  document.getElementById('btnHotspringLayer').textContent = '♨ 温泉';
+  document.getElementById('btnMineLayer').textContent      = '⛏ 鉱山跡';
+
   if (radiusCircle) map.removeLayer(radiusCircle);
   radiusCircle = L.circle([selLat, selLon], {
     radius: radius * 1000,
@@ -773,6 +805,9 @@ function doSearch() {
       btn.disabled = false;
       document.getElementById('loadingMsg').style.display = 'none';
     });
+
+  // オーバーレイ（保護区・温泉・鉱山跡）を非同期取得
+  fetchOverlays();
 }
 
 // ── URL コピー ────────────────────────────────────────
@@ -1239,6 +1274,155 @@ async function fetchRivers() {
     if (e.name === 'AbortError') return;  // キャンセル済み：何もしない
     console.warn('河川データ取得失敗:', e.message);
     if (btn) { btn.textContent = '河川 取得失敗'; btn.disabled = false; }
+  }
+}
+
+// ── オーバーレイレイヤー（保護区・温泉・鉱山跡）──────────────────────
+const parkLayer      = L.layerGroup().addTo(map);
+const hotspringLayer = L.layerGroup();
+const mineLayer      = L.layerGroup();
+let overlayFetched   = false;
+let overlayData      = null;
+let parkVisible      = true;
+let hotspringVisible = false;
+let mineVisible      = false;
+
+function renderParkLayer(parks) {
+  parkLayer.clearLayers();
+  parks.forEach(function(p) {
+    const icon = L.divIcon({
+      html: '<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 5px #e74c3c)">🚫</div>',
+      iconSize: [26, 26], iconAnchor: [13, 13], className: ''
+    });
+    const m = L.marker([p.lat, p.lon], { icon });
+    m.bindTooltip('⚠ ' + p.park_type + ': ' + p.name, { direction: 'top', offset: [0, -8] });
+    m.bindPopup(
+      '<b style="color:#e74c3c">⚠ ' + p.park_type + '</b><br>' +
+      '<b>' + p.name + '</b><br>' +
+      '<div class="p-divider"></div>' +
+      '<div style="color:#f5b7b1;font-size:0.8rem;line-height:1.6">' +
+      '自然公園法により、国立・国定公園内での鉱物・岩石の採集は原則禁止されています。<br>' +
+      '採集前に必ず公園の種別と規制内容を確認してください。</div>' +
+      '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>',
+      { maxWidth: 260, autoPanPaddingTopLeft: L.point(10,10), autoPanPaddingBottomRight: L.point(10,90) }
+    );
+    parkLayer.addLayer(m);
+  });
+}
+
+function renderHotspringLayer(hotsprings) {
+  hotspringLayer.clearLayers();
+  hotsprings.forEach(function(h) {
+    const icon = L.divIcon({
+      html: '<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 4px #e67e22)">♨</div>',
+      iconSize: [24, 24], iconAnchor: [12, 12], className: ''
+    });
+    const m = L.marker([h.lat, h.lon], { icon });
+    m.bindTooltip(h.name, { direction: 'top', offset: [0, -8] });
+    const gmapUrl = 'https://maps.google.com/maps?q=' + h.lat + ',' + h.lon;
+    m.bindPopup(
+      '<b style="color:#e67e22">♨ 温泉・熱水</b><br>' +
+      '<b>' + h.name + '</b><br>' +
+      '<div class="p-divider"></div>' +
+      '<div style="font-size:0.78rem;color:#aaa;line-height:1.6">熱水変質帯の指標。周辺の珪質岩・変質帯を確認してください。オパール・輝安鉱・菱マンガン鉱の探索に有効です。</div>' +
+      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>' +
+      '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>',
+      { maxWidth: 250, autoPanPaddingTopLeft: L.point(10,10), autoPanPaddingBottomRight: L.point(10,90) }
+    );
+    hotspringLayer.addLayer(m);
+  });
+}
+
+function renderMineLayer(mines) {
+  mineLayer.clearLayers();
+  mines.forEach(function(mi) {
+    const icon = L.divIcon({
+      html: '<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 4px #f0b429)">⛏</div>',
+      iconSize: [24, 24], iconAnchor: [12, 12], className: ''
+    });
+    const m = L.marker([mi.lat, mi.lon], { icon });
+    m.bindTooltip(mi.mine_type + ': ' + mi.name, { direction: 'top', offset: [0, -8] });
+    const gmapUrl = 'https://maps.google.com/maps?q=' + mi.lat + ',' + mi.lon;
+    m.bindPopup(
+      '<b style="color:#f0b429">⛏ ' + mi.mine_type + '</b><br>' +
+      '<b>' + mi.name + '</b><br>' +
+      '<div class="p-divider"></div>' +
+      '<div style="font-size:0.78rem;color:#aaa;line-height:1.6">旧採掘地。廃ズリ・坑口・露頭が残存する場合があります。坑道への立入りは危険です。</div>' +
+      '<a class="p-gmap" href="' + gmapUrl + '" target="_blank">📌 Google Maps で開く</a>' +
+      '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>',
+      { maxWidth: 250, autoPanPaddingTopLeft: L.point(10,10), autoPanPaddingBottomRight: L.point(10,90) }
+    );
+    mineLayer.addLayer(m);
+  });
+}
+
+async function fetchOverlays() {
+  if (!selLat) return;
+  const radius = document.getElementById('radiusSl').value;
+  try {
+    const resp = await fetch(
+      '/api/overlays?lat=' + selLat + '&lon=' + selLon + '&radius_km=' + radius
+    );
+    const data = await resp.json();
+    overlayData  = data;
+    overlayFetched = true;
+
+    // 保護区: データがあれば自動表示
+    renderParkLayer(data.parks || []);
+    const parkBtn = document.getElementById('btnParkLayer');
+    if (parkBtn) {
+      parkBtn.disabled = false;
+      const cnt = (data.parks || []).length;
+      parkBtn.textContent = '🚫 保護区' + (cnt > 0 ? ' (' + cnt + ')' : '');
+      parkBtn.classList.toggle('active', cnt > 0);
+      parkVisible = cnt > 0;
+    }
+
+    // 温泉・鉱山跡: ボタンを有効化（表示はユーザー操作）
+    const hsBtn = document.getElementById('btnHotspringLayer');
+    const miBtn = document.getElementById('btnMineLayer');
+    if (hsBtn) {
+      hsBtn.disabled = false;
+      const cnt = (data.hotsprings || []).length;
+      hsBtn.textContent = '♨ 温泉' + (cnt > 0 ? ' (' + cnt + ')' : '');
+    }
+    if (miBtn) {
+      miBtn.disabled = false;
+      const cnt = (data.mines || []).length;
+      miBtn.textContent = '⛏ 鉱山跡' + (cnt > 0 ? ' (' + cnt + ')' : '');
+    }
+  } catch(e) {
+    console.warn('Overlay fetch failed:', e);
+  }
+}
+
+function onParkLayerBtn() {
+  if (!overlayFetched) return;
+  parkVisible = !parkVisible;
+  parkVisible ? map.addLayer(parkLayer) : map.removeLayer(parkLayer);
+  document.getElementById('btnParkLayer').classList.toggle('active', parkVisible);
+}
+
+function onOverlayBtn(type) {
+  if (!overlayFetched) return;
+  if (type === 'hotspring') {
+    hotspringVisible = !hotspringVisible;
+    if (hotspringVisible) {
+      renderHotspringLayer(overlayData.hotsprings || []);
+      map.addLayer(hotspringLayer);
+    } else {
+      map.removeLayer(hotspringLayer);
+    }
+    document.getElementById('btnHotspringLayer').classList.toggle('active', hotspringVisible);
+  } else if (type === 'mine') {
+    mineVisible = !mineVisible;
+    if (mineVisible) {
+      renderMineLayer(overlayData.mines || []);
+      map.addLayer(mineLayer);
+    } else {
+      map.removeLayer(mineLayer);
+    }
+    document.getElementById('btnMineLayer').classList.toggle('active', mineVisible);
   }
 }
 
