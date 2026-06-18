@@ -334,3 +334,15 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = (np.sin(dlat/2)**2 +
          np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon/2)**2)
     return 2 * R * np.arcsin(np.sqrt(a))
+
+
+# ═══════════════════════════════════════════════════════════════
+# 外部産地データの自動マージ（mrds_localities.py が存在する場合）
+# ═══════════════════════════════════════════════════════════════
+try:
+    from mrds_localities import MRDS_LOCALITIES
+    for _key, _entries in MRDS_LOCALITIES.items():
+        if _key in KNOWN_LOCALITIES:
+            KNOWN_LOCALITIES[_key].extend(_entries)
+except ImportError:
+    pass
