@@ -4,7 +4,10 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import json, os, time
-import urllib.request, urllib.parse
+import urllib.request, urllib.parse, urllib.error
+
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 # ── Overpass レスポンスキャッシュ（プロセス内・5分TTL）──────────────
 _CACHE: dict = {}
@@ -312,6 +315,98 @@ def rivers_api():
     }
     _cache_set(cache_key, result)
     return jsonify(result)
+
+
+def _sb(method, path, body=None, raw_body=None, content_type='application/json'):
+    """Supabase REST / Storage API 共通ヘルパー"""
+    url  = SUPABASE_URL + path
+    hdrs = {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Content-Type':  content_type,
+    }
+    if '/rest/v1/' in path:
+        hdrs['Prefer'] = 'return=representation'
+    data = (json.dumps(body).encode() if body is not None
+            else raw_body)
+    req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            buf = r.read()
+            return json.loads(buf) if buf else {}
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode('utf-8', errors='replace')[:300]
+        raise RuntimeError(f'Supabase {e.code}: {msg}')
+
+
+@app.route('/api/notes', methods=['GET'])
+def notes_list():
+    if not SUPABASE_URL:
+        return jsonify({'notes': []})
+    try:
+        rows = _sb('GET', '/rest/v1/notes?select=*&order=created_at.desc')
+        return jsonify({'notes': rows if isinstance(rows, list) else []})
+    except Exception as e:
+        return jsonify({'notes': [], 'error': str(e)})
+
+
+@app.route('/api/notes', methods=['POST'])
+def notes_create():
+    if not SUPABASE_URL:
+        return jsonify({'error': 'Supabase not configured'}), 503
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = _sb('POST', '/rest/v1/notes', body=payload)
+        return jsonify(result[0] if isinstance(result, list) else result), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notes/<nid>', methods=['PATCH'])
+def notes_update(nid):
+    if not SUPABASE_URL:
+        return jsonify({'error': 'Supabase not configured'}), 503
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = _sb('PATCH', f'/rest/v1/notes?id=eq.{nid}', body=payload)
+        return jsonify(result[0] if isinstance(result, list) else result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notes/<nid>', methods=['DELETE'])
+def notes_delete(nid):
+    if not SUPABASE_URL:
+        return jsonify({'error': 'Supabase not configured'}), 503
+    try:
+        _sb('DELETE', f'/rest/v1/notes?id=eq.{nid}')
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notes/<nid>/image', methods=['POST'])
+def notes_image(nid):
+    if not SUPABASE_URL:
+        return jsonify({'error': 'Supabase not configured'}), 503
+    if 'image' not in request.files:
+        return jsonify({'error': 'No file'}), 400
+    f    = request.files['image']
+    ext  = (f.filename.rsplit('.', 1)[-1].lower() if '.' in (f.filename or '') else 'jpg')
+    ext  = ext if ext in ('jpg', 'jpeg', 'png', 'webp') else 'jpg'
+    mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}'
+    img  = f.read()
+    path = f'{nid}/{int(time.time())}.{ext}'
+    try:
+        _sb('POST', f'/storage/v1/object/note-images/{path}',
+            raw_body=img, content_type=mime)
+        url = f'{SUPABASE_URL}/storage/v1/object/public/note-images/{path}'
+        cur  = _sb('GET', f'/rest/v1/notes?id=eq.{nid}&select=image_urls')
+        urls = (cur[0].get('image_urls') or []) if cur else []
+        _sb('PATCH', f'/rest/v1/notes?id=eq.{nid}', body={'image_urls': urls + [url]})
+        return jsonify({'url': url})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/overlays')

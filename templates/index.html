@@ -414,6 +414,50 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
   .layer-section { display: none; }
   .sidebar.drawer-open .layer-section { display: block; padding: 6px 12px 8px; }
 }
+
+/* ── フィールドメモ ── */
+.note-place-mode #map { cursor: crosshair !important; }
+.note-modal {
+  position: fixed; inset: 0; z-index: 3000;
+  background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.note-modal-inner {
+  background: #12122a; border: 1px solid #2980b9;
+  border-radius: 10px; padding: 18px;
+  width: 100%; max-width: 420px;
+  max-height: 90vh; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.note-modal-title { font-size: 1rem; font-weight: bold; color: #5dade2; margin-bottom: 10px; }
+.note-coord-disp  { font-size: 0.73rem; color: #7fb3d3; font-family: monospace; margin-bottom: 10px; }
+.note-field       { margin-bottom: 9px; }
+.note-field label {
+  display: block; font-size: 0.67rem; color: #8baabf;
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px;
+}
+.note-field input[type=text],
+.note-field input[type=date],
+.note-field textarea {
+  width: 100%; padding: 7px 9px;
+  background: #1e3a5f; border: 1px solid #2d6a9f;
+  border-radius: 4px; color: #e8e8e8; font-size: 0.87rem; font-family: inherit;
+}
+.note-field textarea { resize: vertical; min-height: 65px; }
+.note-field input:focus, .note-field textarea:focus { outline: none; border-color: #5dade2; }
+.note-stars-row { display: flex; gap: 4px; font-size: 1.6rem; cursor: pointer; }
+.note-stars-row span:hover { transform: scale(1.15); }
+.note-actions { display: flex; gap: 8px; margin-top: 14px; }
+.note-actions button {
+  flex: 1; padding: 9px; border: none; border-radius: 4px;
+  cursor: pointer; font-size: 0.87rem; font-weight: bold;
+}
+.btn-note-save   { background: #2980b9; color: white; }
+.btn-note-save:hover:not(:disabled) { background: #3498db; }
+.btn-note-save:disabled { background: #1e3357; color: #4a6fa5; }
+.btn-note-cancel { background: #1e3a5f; color: #7fb3d3; border: 1px solid #2d6a9f !important; }
+.btn-note-cancel:hover { background: #2d5a8e; }
 </style>
 </head>
 <body>
@@ -521,6 +565,14 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
           ⛏ 鉱山跡
         </button>
       </div>
+      <div class="layer-btns" style="margin-top:5px">
+        <button class="btn-layer active" id="btnNotesLayer" onclick="toggleNotesLayer()">
+          📝 メモ
+        </button>
+        <button class="btn-layer" id="btnNotePlace" onclick="toggleNotePlaceMode()">
+          ＋ メモ追加
+        </button>
+      </div>
     </div>
 
     <div class="result-panel">
@@ -535,6 +587,38 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
   <div id="map"></div>
 
 </div><!-- .main -->
+
+<!-- フィールドメモ モーダル -->
+<div id="noteModal" class="note-modal" style="display:none">
+  <div class="note-modal-inner">
+    <div class="note-modal-title">📝 フィールドメモ</div>
+    <div class="note-coord-disp" id="noteCoordDisp"></div>
+    <div class="note-field">
+      <label>タイトル（任意）</label>
+      <input type="text" id="noteTitle" placeholder="例: 〇〇川 上流砂礫">
+    </div>
+    <div class="note-field">
+      <label>訪問日</label>
+      <input type="date" id="noteDate">
+    </div>
+    <div class="note-field">
+      <label>環境・状況</label>
+      <textarea id="noteEnv" placeholder="岩盤の露出状況、水量、アクセスなど"></textarea>
+    </div>
+    <div class="note-field">
+      <label>採取記録</label>
+      <textarea id="noteFind" placeholder="採取できたもの、採取できなかった理由など"></textarea>
+    </div>
+    <div class="note-field">
+      <label>評価</label>
+      <div class="note-stars-row" id="noteStarsRow"></div>
+    </div>
+    <div class="note-actions">
+      <button class="btn-note-save" id="btnNoteSave" onclick="saveNote()">💾 保存</button>
+      <button class="btn-note-cancel" onclick="closeNoteModal()">キャンセル</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -732,7 +816,12 @@ const LocationControl = L.Control.extend({
 new LocationControl({ position: 'bottomright' }).addTo(map);
 
 // ── 地図クリック ───────────────────────────────────────
-map.on('click', e => {
+map.on('click', function(e) {
+  if (notePlaceMode) {
+    toggleNotePlaceMode();
+    openNoteModal(parseFloat(e.latlng.lat.toFixed(5)), parseFloat(e.latlng.lng.toFixed(5)), null);
+    return;
+  }
   setPin(parseFloat(e.latlng.lat.toFixed(5)), parseFloat(e.latlng.lng.toFixed(5)));
 });
 
@@ -1434,6 +1523,187 @@ function onOverlayBtn(type) {
     document.getElementById('btnMineLayer').classList.toggle('active', mineVisible);
   }
 }
+
+// ── フィールドメモ ─────────────────────────────────────────────
+const notesLayer  = L.layerGroup().addTo(map);
+const notesById   = {};
+let notesVisible  = true;
+let notePlaceMode = false;
+let pendingNoteStars = 3;
+let editingNoteId    = null;
+
+function initNoteStars(n) {
+  pendingNoteStars = n || 3;
+  const row = document.getElementById('noteStarsRow');
+  if (!row) return;
+  row.innerHTML = Array.from({length:5}, function(_,i) {
+    return '<span onclick="setNoteStars(' + (i+1) + ')" title="' + (i+1) + '星">' +
+           (i < pendingNoteStars ? '★' : '☆') + '</span>';
+  }).join('');
+}
+function setNoteStars(n) { pendingNoteStars = n; initNoteStars(n); }
+
+function openNoteModal(lat, lon, note) {
+  editingNoteId = note ? note.id : null;
+  document.getElementById('noteCoordDisp').textContent =
+    lat.toFixed(5) + '°N,  ' + lon.toFixed(5) + '°E';
+  document.getElementById('noteTitle').value = note ? (note.title || '') : '';
+  document.getElementById('noteDate').value  = note ? (note.visit_date || '') : new Date().toISOString().slice(0,10);
+  document.getElementById('noteEnv').value   = note ? (note.env_notes  || '') : '';
+  document.getElementById('noteFind').value  = note ? (note.find_notes || '') : '';
+  document.getElementById('noteModal').dataset.lat = lat;
+  document.getElementById('noteModal').dataset.lon = lon;
+  initNoteStars(note ? note.stars : 3);
+  document.getElementById('noteModal').style.display = 'flex';
+}
+function closeNoteModal() {
+  document.getElementById('noteModal').style.display = 'none';
+  editingNoteId = null;
+}
+
+async function saveNote() {
+  const btn = document.getElementById('btnNoteSave');
+  btn.disabled = true; btn.textContent = '保存中…';
+  const modal = document.getElementById('noteModal');
+  const payload = {
+    lat:        parseFloat(modal.dataset.lat),
+    lon:        parseFloat(modal.dataset.lon),
+    title:      document.getElementById('noteTitle').value.trim(),
+    visit_date: document.getElementById('noteDate').value || null,
+    env_notes:  document.getElementById('noteEnv').value.trim(),
+    find_notes: document.getElementById('noteFind').value.trim(),
+    stars:      pendingNoteStars,
+  };
+  try {
+    const url    = editingNoteId ? '/api/notes/' + editingNoteId : '/api/notes';
+    const method = editingNoteId ? 'PATCH' : 'POST';
+    const r = await fetch(url, {
+      method, headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    closeNoteModal();
+    await loadNotes();
+  } catch(e) {
+    alert('保存エラー: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 保存';
+  }
+}
+
+function makeNoteIcon(stars) {
+  const palette = ['#95a5a6','#e67e22','#f1c40f','#2ecc71','#3498db'];
+  const c = palette[Math.max(0, (stars || 3) - 1)];
+  return L.divIcon({
+    html: '<div style="width:30px;height:30px;background:#0d1b2e;border:2px solid ' + c +
+          ';border-radius:50%;display:flex;align-items:center;justify-content:center;' +
+          'font-size:14px;box-shadow:0 0 6px ' + c + '88">📝</div>',
+    iconSize: [30,30], iconAnchor: [15,15], className: ''
+  });
+}
+
+function notePopupHtml(note) {
+  const stars  = '★'.repeat(note.stars||3) + '☆'.repeat(5-(note.stars||3));
+  const date   = note.visit_date ? note.visit_date.slice(0,10) : '—';
+  const gmUrl  = 'https://maps.google.com/maps?q=' + note.lat + ',' + note.lon;
+  const imgs   = (note.image_urls || []).map(function(u) {
+    return '<a href="' + u + '" target="_blank">' +
+           '<img src="' + u + '" style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #2d6a9f"></a>';
+  }).join('');
+
+  return '<div style="font-size:0.82rem;min-width:230px">' +
+    '<div style="font-size:1rem;font-weight:bold;color:#5dade2;margin-bottom:4px">📝 ' + (note.title||'（タイトルなし）') + '</div>' +
+    '<div style="color:#f0b429">' + stars + '</div>' +
+    '<div style="color:#8baabf;font-size:0.72rem;margin-bottom:6px">📅 ' + date + '</div>' +
+    '<div class="p-divider"></div>' +
+    (note.env_notes  ? '<div style="margin-bottom:5px"><b style="color:#7fb3d3">環境・状況</b><br>' + note.env_notes  + '</div>' : '') +
+    (note.find_notes ? '<div style="margin-bottom:5px"><b style="color:#7fb3d3">採取記録</b><br>'  + note.find_notes + '</div>' : '') +
+    (imgs ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">' + imgs + '</div>' : '') +
+    '<div class="p-divider"></div>' +
+    '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">' +
+    '<label style="flex:1;padding:6px;background:#1e3a5f;border:1px solid #2d6a9f;border-radius:4px;text-align:center;cursor:pointer;font-size:0.76rem;color:#7fb3d3">' +
+    '📷 写真追加<input type="file" accept="image/*" capture="environment" style="display:none" onchange="uploadNoteImage(\'' + note.id + '\',this)"></label>' +
+    '<button onclick="openNoteModal(' + note.lat + ',' + note.lon + ',notesById[\'' + note.id + '\'])" ' +
+    'style="flex:1;padding:6px;background:#1e3a5f;border:1px solid #2d6a9f;border-radius:4px;cursor:pointer;font-size:0.76rem;color:#7fb3d3">✏ 編集</button>' +
+    '<button onclick="deleteNote(\'' + note.id + '\')" ' +
+    'style="flex:1;padding:6px;background:#3d0000;border:1px solid #922b21;border-radius:4px;cursor:pointer;font-size:0.76rem;color:#f1948a">🗑 削除</button>' +
+    '</div>' +
+    '<a class="p-gmap" href="' + gmUrl + '" target="_blank">📌 Google Maps で開く</a>' +
+    '<button class="p-close" onclick="map.closePopup()">✕ 閉じる</button>' +
+    '</div>';
+}
+
+async function loadNotes() {
+  try {
+    const r = await fetch('/api/notes');
+    const data = await r.json();
+    notesLayer.clearLayers();
+    Object.keys(notesById).forEach(function(k) { delete notesById[k]; });
+    (data.notes || []).forEach(function(note) {
+      notesById[note.id] = note;
+      const marker = L.marker([note.lat, note.lon], {icon: makeNoteIcon(note.stars)});
+      marker.bindTooltip((note.title||'📝メモ') + ' ' + '★'.repeat(note.stars||3), {direction:'top', offset:[0,-10]});
+      marker.bindPopup(notePopupHtml(note), {
+        maxWidth: 300,
+        autoPanPaddingTopLeft: L.point(10,10),
+        autoPanPaddingBottomRight: L.point(10,90)
+      });
+      notesLayer.addLayer(marker);
+    });
+    const btn = document.getElementById('btnNotesLayer');
+    if (btn) {
+      const cnt = (data.notes||[]).length;
+      btn.textContent = '📝 メモ' + (cnt > 0 ? ' (' + cnt + ')' : '');
+      btn.classList.toggle('active', notesVisible);
+    }
+  } catch(e) {
+    console.warn('Notes load failed:', e);
+  }
+}
+
+async function deleteNote(id) {
+  if (!confirm('このメモを削除しますか？')) return;
+  map.closePopup();
+  try {
+    await fetch('/api/notes/' + id, {method: 'DELETE'});
+    await loadNotes();
+  } catch(e) {
+    alert('削除エラー: ' + e.message);
+  }
+}
+
+async function uploadNoteImage(noteId, input) {
+  if (!input.files.length) return;
+  const form = new FormData();
+  form.append('image', input.files[0]);
+  map.closePopup();
+  try {
+    const r = await fetch('/api/notes/' + noteId + '/image', {method:'POST', body: form});
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    await loadNotes();
+  } catch(e) {
+    alert('画像アップロードエラー: ' + e.message);
+  }
+}
+
+function toggleNotesLayer() {
+  notesVisible = !notesVisible;
+  notesVisible ? map.addLayer(notesLayer) : map.removeLayer(notesLayer);
+  document.getElementById('btnNotesLayer').classList.toggle('active', notesVisible);
+}
+
+function toggleNotePlaceMode() {
+  notePlaceMode = !notePlaceMode;
+  const btn = document.getElementById('btnNotePlace');
+  btn.classList.toggle('active', notePlaceMode);
+  btn.textContent = notePlaceMode ? '✕ キャンセル' : '＋ メモ追加';
+  document.body.classList.toggle('note-place-mode', notePlaceMode);
+}
+
+// 起動時にメモを読み込む
+loadNotes();
 
 // 既知産地をAPIから取得
 fetch('/api/localities')
