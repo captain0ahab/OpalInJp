@@ -762,6 +762,7 @@ function doSearch() {
   if (riverBtn) { riverBtn.disabled = false; riverBtn.classList.remove('active'); riverBtn.textContent = '河川スコア'; }
 
   // オーバーレイリセット
+  if (overlayAbortController) { overlayAbortController.abort(); overlayAbortController = null; }
   overlayFetched = false;
   overlayData    = null;
   parkLayer.clearLayers();
@@ -1281,8 +1282,9 @@ async function fetchRivers() {
 const parkLayer      = L.layerGroup().addTo(map);
 const hotspringLayer = L.layerGroup();
 const mineLayer      = L.layerGroup();
-let overlayFetched   = false;
-let overlayData      = null;
+let overlayFetched        = false;
+let overlayData           = null;
+let overlayAbortController = null;
 let parkVisible      = true;
 let hotspringVisible = false;
 let mineVisible      = false;
@@ -1358,10 +1360,16 @@ function renderMineLayer(mines) {
 
 async function fetchOverlays() {
   if (!selLat) return;
+
+  if (overlayAbortController) overlayAbortController.abort();
+  overlayAbortController = new AbortController();
+  const signal = overlayAbortController.signal;
+
   const radius = document.getElementById('radiusSl').value;
   try {
     const resp = await fetch(
-      '/api/overlays?lat=' + selLat + '&lon=' + selLon + '&radius_km=' + radius
+      '/api/overlays?lat=' + selLat + '&lon=' + selLon + '&radius_km=' + radius,
+      { signal }
     );
     const data = await resp.json();
     overlayData  = data;
@@ -1392,6 +1400,7 @@ async function fetchOverlays() {
       miBtn.textContent = '⛏ 鉱山跡' + (cnt > 0 ? ' (' + cnt + ')' : '');
     }
   } catch(e) {
+    if (e.name === 'AbortError') return;
     console.warn('Overlay fetch failed:', e);
   }
 }

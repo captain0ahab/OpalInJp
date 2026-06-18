@@ -3,8 +3,26 @@ from flask import Flask, request, jsonify, render_template
 from pathlib import Path
 import pandas as pd
 import numpy as np
-import json, os
+import json, os, time
 import urllib.request, urllib.parse
+
+# ── Overpass レスポンスキャッシュ（プロセス内・5分TTL）──────────────
+_CACHE: dict = {}
+_CACHE_TTL   = 300  # 秒
+
+def _cache_get(key):
+    entry = _CACHE.get(key)
+    if entry and time.time() - entry['ts'] < _CACHE_TTL:
+        return entry['data']
+    return None
+
+def _cache_set(key, data):
+    _CACHE[key] = {'data': data, 'ts': time.time()}
+    if len(_CACHE) > 500:
+        cutoff = time.time() - _CACHE_TTL
+        stale = [k for k, v in _CACHE.items() if v['ts'] < cutoff]
+        for k in stale:
+            _CACHE.pop(k, None)
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
@@ -203,8 +221,13 @@ def rivers_api():
     west,  east  = lon - deg / cos_l, lon + deg / cos_l
     bbox  = f"{south:.5f},{west:.5f},{north:.5f},{east:.5f}"
 
+    cache_key = ('rivers', round(lat, 2), round(lon, 2), radius_km, mineral)
+    cached = _cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
     query = (
-        f'[out:json][timeout:25];'
+        f'[out:json][timeout:12];'
         f'(way["waterway"~"^(river|stream)$"]({bbox}););'
         f'out geom;'
     )
@@ -218,7 +241,7 @@ def rivers_api():
                 'Accept':       'application/json',
             }
         )
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=15) as r:
             osm = json.loads(r.read().decode())
     except Exception as e:
         # Overpass 失敗時は空結果を返す（500 にしない）
@@ -280,13 +303,15 @@ def rivers_api():
             }
         })
 
-    return jsonify({
+    result = {
         'type':       'FeatureCollection',
         'features':   features,
         'ref_radius': ref_radius,
         'max_score':  max_score,
         'mineral':    mineral,
-    })
+    }
+    _cache_set(cache_key, result)
+    return jsonify(result)
 
 
 @app.route('/api/overlays')
@@ -304,8 +329,13 @@ def overlays_api():
     west,  east  = lon - deg / cos_l, lon + deg / cos_l
     bbox = f"{south:.5f},{west:.5f},{north:.5f},{east:.5f}"
 
+    cache_key = ('overlays', round(lat, 2), round(lon, 2), radius_km)
+    cached = _cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
     query = (
-        f'[out:json][timeout:30];'
+        f'[out:json][timeout:12];'
         f'('
         f'relation["boundary"="national_park"]({bbox});'
         f'relation["boundary"="protected_area"]({bbox});'
@@ -327,7 +357,7 @@ def overlays_api():
                 'Accept':       'application/json',
             }
         )
-        with urllib.request.urlopen(req, timeout=35) as r:
+        with urllib.request.urlopen(req, timeout=15) as r:
             osm = json.loads(r.read().decode())
     except Exception as e:
         return jsonify({'parks': [], 'hotsprings': [], 'mines': [], 'warning': str(e)})
@@ -367,7 +397,9 @@ def overlays_api():
             mine_type = '旧鉱山' if tags.get('historic') == 'mine' else '坑道'
             mines.append({'name': name or mine_type, 'lat': lat_el, 'lon': lon_el, 'mine_type': mine_type})
 
-    return jsonify({'parks': parks, 'hotsprings': hotsprings, 'mines': mines})
+    result = {'parks': parks, 'hotsprings': hotsprings, 'mines': mines}
+    _cache_set(cache_key, result)
+    return jsonify(result)
 
 
 if __name__ == '__main__':
