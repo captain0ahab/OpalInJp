@@ -296,7 +296,36 @@ select:focus { outline: none; border-color: #5dade2; }
 .card-age  { font-size: 0.7rem; color: #6ca; }
 
 /* ── マップ ── */
-#map { flex: 1; background: #1a1a2e; }
+.main { position: relative; }
+#map  { flex: 1; background: #1a1a2e; }
+
+/* ── マップローディングオーバーレイ ── */
+.map-overlay {
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  left: 260px; /* サイドバー幅分オフセット */
+  background: rgba(10, 18, 35, 0.68);
+  backdrop-filter: blur(2px);
+  z-index: 1100;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none;
+}
+@media (max-width: 767px) {
+  .map-overlay { left: 0; }
+}
+.map-spinner {
+  width: 56px; height: 56px;
+  border: 4px solid rgba(52, 152, 219, 0.25);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: mapSpin 0.85s linear infinite;
+}
+@keyframes mapSpin { to { transform: rotate(360deg); } }
+.map-overlay-text {
+  margin-top: 16px; color: #7fb3d3;
+  font-size: 0.88rem; letter-spacing: 0.08em;
+}
 
 /* GSIタイルをダークモード化（色反転 + 色相補正） */
 .dark-tiles { filter: invert(100%) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
@@ -586,6 +615,12 @@ details[open] .p-breakdown summary::before { content: '▼ '; }
   <!-- ── 地図 ── -->
   <div id="map"></div>
 
+  <!-- ── ローディングオーバーレイ ── -->
+  <div id="mapLoading" class="map-overlay" style="display:none">
+    <div class="map-spinner"></div>
+    <div class="map-overlay-text">調査中…</div>
+  </div>
+
 </div><!-- .main -->
 
 <!-- フィールドメモ モーダル -->
@@ -839,6 +874,7 @@ function doSearch() {
   document.getElementById('copyBtn').style.display = 'block';
 
   btn.disabled = true;
+  document.getElementById('mapLoading').style.display = 'flex';
   document.getElementById('loadingMsg').style.display = 'block';
   document.getElementById('resultHdr').style.display  = 'none';
   document.getElementById('mineralInfo').style.display = 'none';
@@ -894,6 +930,7 @@ function doSearch() {
     .finally(() => {
       btn.disabled = false;
       document.getElementById('loadingMsg').style.display = 'none';
+      document.getElementById('mapLoading').style.display = 'none';
     });
 
   // オーバーレイ（保護区・温泉・鉱山跡）を非同期取得
