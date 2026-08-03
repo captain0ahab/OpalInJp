@@ -1562,6 +1562,40 @@ function onOverlayBtn(type) {
 }
 
 // ── フィールドメモ ─────────────────────────────────────────────
+// ユーザー投稿のテキスト（タイトル・環境記録・採取記録）は Leaflet の
+// bindPopup/bindTooltip にそのまま渡すと innerHTML として描画されるため、
+// 表示前に必ずエスケープする（ストアド XSS 対策）。
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+// インラインイベントハンドラ属性の中に JS 文字列リテラルとして値を埋め込む際、
+// HTMLエスケープだけでは属性の外側は守れても内側の JS 文字列は守れない
+// （ブラウザが属性値をエンティティ解読してから JS として実行するため）。
+// JSON.stringify で JS 文字列として正しくエスケープしたうえで、
+// その結果をさらに HTML 属性用にエスケープする。
+function jsAttr(v) {
+  return escapeHtml(JSON.stringify(v));
+}
+
+// メモの編集用合言葉（NOTES_EDIT_KEY）。サーバーが要求してきた（403）時にだけ
+// 尋ねる。設定されていないデプロイでは一切プロンプトは出ない。
+async function notesFetch(url, opts) {
+  opts = opts || {};
+  const stored = localStorage.getItem('opalinjp_edit_key') || '';
+  opts.headers = Object.assign({}, opts.headers, stored ? {'X-Edit-Key': stored} : {});
+  let r = await fetch(url, opts);
+  if (r.status === 403) {
+    const entered = prompt('メモの編集には合言葉が必要です。入力してください:');
+    if (entered === null) return r;
+    localStorage.setItem('opalinjp_edit_key', entered);
+    opts.headers = Object.assign({}, opts.headers, {'X-Edit-Key': entered});
+    r = await fetch(url, opts);
+  }
+  return r;
+}
+
 const notesLayer  = L.layerGroup().addTo(map);
 const notesById   = {};
 let notesVisible  = true;
@@ -1614,12 +1648,12 @@ async function saveNote() {
   try {
     const url    = editingNoteId ? '/api/notes/' + editingNoteId : '/api/notes';
     const method = editingNoteId ? 'PATCH' : 'POST';
-    const r = await fetch(url, {
+    const r = await notesFetch(url, {
       method, headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
     });
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
+    if (!r.ok || data.error) throw new Error(data.error || ('HTTP ' + r.status));
     closeNoteModal();
     await loadNotes();
   } catch(e) {
@@ -1645,25 +1679,25 @@ function notePopupHtml(note) {
   const date   = note.visit_date ? note.visit_date.slice(0,10) : '—';
   const gmUrl  = 'https://maps.google.com/maps?q=' + note.lat + ',' + note.lon;
   const imgs   = (note.image_urls || []).map(function(u) {
-    return '<a href="' + u + '" target="_blank">' +
-           '<img src="' + u + '" style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #2d6a9f"></a>';
+    return '<a href="' + escapeHtml(u) + '" target="_blank">' +
+           '<img src="' + escapeHtml(u) + '" style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #2d6a9f"></a>';
   }).join('');
 
   return '<div style="font-size:0.82rem;min-width:230px">' +
-    '<div style="font-size:1rem;font-weight:bold;color:#5dade2;margin-bottom:4px">📝 ' + (note.title||'（タイトルなし）') + '</div>' +
+    '<div style="font-size:1rem;font-weight:bold;color:#5dade2;margin-bottom:4px">📝 ' + escapeHtml(note.title||'（タイトルなし）') + '</div>' +
     '<div style="color:#f0b429">' + stars + '</div>' +
     '<div style="color:#8baabf;font-size:0.72rem;margin-bottom:6px">📅 ' + date + '</div>' +
     '<div class="p-divider"></div>' +
-    (note.env_notes  ? '<div style="margin-bottom:5px"><b style="color:#7fb3d3">環境・状況</b><br>' + note.env_notes  + '</div>' : '') +
-    (note.find_notes ? '<div style="margin-bottom:5px"><b style="color:#7fb3d3">採取記録</b><br>'  + note.find_notes + '</div>' : '') +
+    (note.env_notes  ? '<div style="margin-bottom:5px"><b style="color:#7fb3d3">環境・状況</b><br>' + escapeHtml(note.env_notes)  + '</div>' : '') +
+    (note.find_notes ? '<div style="margin-bottom:5px"><b style="color:#7fb3d3">採取記録</b><br>'  + escapeHtml(note.find_notes) + '</div>' : '') +
     (imgs ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">' + imgs + '</div>' : '') +
     '<div class="p-divider"></div>' +
     '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">' +
     '<label style="flex:1;padding:6px;background:#1e3a5f;border:1px solid #2d6a9f;border-radius:4px;text-align:center;cursor:pointer;font-size:0.76rem;color:#7fb3d3">' +
-    '📷 写真追加<input type="file" accept="image/*" capture="environment" style="display:none" onchange="uploadNoteImage(\'' + note.id + '\',this)"></label>' +
-    '<button onclick="openNoteModal(' + note.lat + ',' + note.lon + ',notesById[\'' + note.id + '\'])" ' +
+    '📷 写真追加<input type="file" accept="image/*" capture="environment" style="display:none" onchange="uploadNoteImage(' + jsAttr(note.id) + ',this)"></label>' +
+    '<button onclick="openNoteModal(' + note.lat + ',' + note.lon + ',notesById[' + jsAttr(note.id) + '])" ' +
     'style="flex:1;padding:6px;background:#1e3a5f;border:1px solid #2d6a9f;border-radius:4px;cursor:pointer;font-size:0.76rem;color:#7fb3d3">✏ 編集</button>' +
-    '<button onclick="deleteNote(\'' + note.id + '\')" ' +
+    '<button onclick="deleteNote(' + jsAttr(note.id) + ')" ' +
     'style="flex:1;padding:6px;background:#3d0000;border:1px solid #922b21;border-radius:4px;cursor:pointer;font-size:0.76rem;color:#f1948a">🗑 削除</button>' +
     '</div>' +
     '<a class="p-gmap" href="' + gmUrl + '" target="_blank">📌 Google Maps で開く</a>' +
@@ -1680,7 +1714,7 @@ async function loadNotes() {
     (data.notes || []).forEach(function(note) {
       notesById[note.id] = note;
       const marker = L.marker([note.lat, note.lon], {icon: makeNoteIcon(note.stars)});
-      marker.bindTooltip((note.title||'📝メモ') + ' ' + '★'.repeat(note.stars||3), {direction:'top', offset:[0,-10]});
+      marker.bindTooltip(escapeHtml(note.title||'📝メモ') + ' ' + '★'.repeat(note.stars||3), {direction:'top', offset:[0,-10]});
       marker.bindPopup(notePopupHtml(note), {
         maxWidth: 300,
         autoPanPaddingTopLeft: L.point(10,10),
@@ -1703,7 +1737,9 @@ async function deleteNote(id) {
   if (!confirm('このメモを削除しますか？')) return;
   map.closePopup();
   try {
-    await fetch('/api/notes/' + id, {method: 'DELETE'});
+    const r = await notesFetch('/api/notes/' + id, {method: 'DELETE'});
+    const d = await r.json().catch(function() { return {}; });
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
     await loadNotes();
   } catch(e) {
     alert('削除エラー: ' + e.message);
@@ -1716,9 +1752,9 @@ async function uploadNoteImage(noteId, input) {
   form.append('image', input.files[0]);
   map.closePopup();
   try {
-    const r = await fetch('/api/notes/' + noteId + '/image', {method:'POST', body: form});
+    const r = await notesFetch('/api/notes/' + noteId + '/image', {method:'POST', body: form});
     const d = await r.json();
-    if (d.error) throw new Error(d.error);
+    if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
     await loadNotes();
   } catch(e) {
     alert('画像アップロードエラー: ' + e.message);

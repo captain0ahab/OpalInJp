@@ -8,6 +8,7 @@
 """
 
 import sys
+import json
 import geopandas as gpd
 import pandas as pd
 import numpy as np
@@ -206,63 +207,30 @@ cands_wgs84["dist_tokyo_km"] = haversine(
     cands_wgs84["lon"].values, cands_wgs84["lat"].values
 ).round(1)
 
-# ── 6b. 既知産地スコア（ベクトル化バッチ計算）───────────────────
-print("既知産地スコア計算中...")
-from score_extras import KNOWN_LOCALITIES
-
-def _locality_score_batch(lats_arr, lons_arr, mineral_key,
-                           thresholds=((20, 3.0), (50, 2.0))):
-    """全ポリゴンに対して既知産地スコアをベクトル計算"""
-    locs = KNOWN_LOCALITIES.get(mineral_key, [])
-    n    = len(lats_arr)
-    if not locs:
-        return np.zeros(n), np.full(n, '', dtype=object)
-    R      = 6371.0
-    lats_r = np.radians(np.asarray(lats_arr, dtype=float))
-    lons_r = np.radians(np.asarray(lons_arr, dtype=float))
-    best_s = np.zeros(n)
-    best_n = np.full(n, '', dtype=object)
-    for name, loc_lat, loc_lon, conf, note in locs:
-        lr    = np.radians(loc_lat); lor = np.radians(loc_lon)
-        dlat  = lats_r - lr; dlon = lons_r - lor
-        a     = np.sin(dlat/2)**2 + np.cos(lr) * np.cos(lats_r) * np.sin(dlon/2)**2
-        dists = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
-        for max_km, base in thresholds:
-            mask = dists <= max_km
-            if not mask.any():
-                continue
-            adj    = base * (conf / 3.0)
-            better = mask & (adj > best_s)
-            if better.any():
-                best_s[better] = adj
-                for i in np.where(better)[0]:
-                    best_n[i] = f"{name}（{dists[i]:.0f}km）"
-            break  # この産地は最初に合致した閾値のみ適用
-    return np.round(best_s, 2), best_n.tolist()
-
-lats_arr = cands_wgs84["lat"].values
-lons_arr = cands_wgs84["lon"].values
-for key in target_keys:
-    s_arr, n_arr = _locality_score_batch(lats_arr, lons_arr, key)
-    cands_wgs84[f"score_locality_{key}"] = s_arr
-    cands_wgs84[f"nearest_{key}"]        = n_arr
-    hits = (s_arr > 0).sum()
-    print(f"  {MINERALS[key]['name_ja']}: 産地スコア > 0 = {hits:,} ポリゴン")
+# 既知産地スコアは app.py が検索時にリアルタイム計算するため（KNOWN_LOCALITIES
+# が頻繁に更新されるので、CSVに焼き込むと更新のたびに全ポリゴン再解析が必要に
+# なってしまう）、ここではバッチ計算しない。
 
 # ── 7. CSV 出力 ────────────────────────────────────────────────
 base_cols = ["symbol", "near_fault", "dist_tokyo_km", "lon", "lat",
              "formationage_ja", "group_ja", "lithology_ja", "lithology_en",
              "total_score"]
-locality_cols = (
-    [f"score_locality_{k}" for k in target_keys] +
-    [f"nearest_{k}"        for k in target_keys]
-)
-out_cols = base_cols + score_cols + ["score_hydrothermal"] + locality_cols
+out_cols = base_cols + score_cols + ["score_hydrothermal"]
 result_df = cands_wgs84[[c for c in out_cols if c in cands_wgs84.columns]].copy()
 result_df = result_df.sort_values("total_score", ascending=False)
 csv_path = OUT / "mineral_candidates.csv"
 result_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
 print(f"CSV 保存: {csv_path}")
+
+BUILD_INFO = {
+    'pipeline_version': 2,       # 出力スキーマや計算式を変えたら上げる
+    'row_count':        len(result_df),
+    'target_minerals':  target_keys,
+    'generated_at':      pd.Timestamp.now().isoformat(),
+}
+with open(OUT / "build_info.json", "w", encoding="utf-8") as f:
+    json.dump(BUILD_INFO, f, ensure_ascii=False, indent=2)
+print(f"ビルド情報を記録: {OUT / 'build_info.json'}")
 
 # ── 8. Folium インタラクティブ地図 ────────────────────────────
 print("地図生成中...")

@@ -1,0 +1,17 @@
+{
+  "pipeline_version": 2,
+  "row_count": 78081,
+  "target_minerals": [
+    "opal",
+    "gold",
+    "jade",
+    "quartz",
+    "garnet",
+    "magnetite",
+    "fluorite",
+    "stibnite",
+    "rhodochrosite"
+  ],
+  "generated_at": null,
+  "note": "このファイルは既存CSVから未使用列を削除して更新（analyze_minerals.py再実行なし）"
+}

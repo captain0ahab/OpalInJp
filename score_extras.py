@@ -179,7 +179,7 @@ KNOWN_LOCALITIES = {
 
 
 def known_locality_score(lat, lon, mineral_key,
-                          thresholds=((20, 3.0), (50, 2.0), (100, 1.0))):
+                          thresholds=((20, 3.0), (50, 2.0))):
     """
     既知産地との距離に基づくスコア加算
     thresholds: [(距離km, スコア), ...] 近い順に評価
