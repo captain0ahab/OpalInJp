@@ -948,7 +948,9 @@ function copyUrl() {
 }
 
 // ── URL パラメーターから自動復元 ──────────────────────
-(function restoreFromUrl() {
+// スクリプト末尾の let/const（overlayAbortController 等）が初期化される前に doSearch が走ると
+// ReferenceError で「調査中…」が消えなくなるため、DOMContentLoaded まで遅延させる
+document.addEventListener('DOMContentLoaded', function restoreFromUrl() {
   const p = new URLSearchParams(location.search);
   if (!p.has('lat') || !p.has('lon')) {
     // URL パラメーターなし → 現在位置で初期表示
@@ -971,7 +973,7 @@ function copyUrl() {
 
   map.setView([selLat, selLon], 9);
   doSearch();
-})();
+});
 
 // ── 結果描画 ──────────────────────────────────────────
 function ratioColor(ratio) {
