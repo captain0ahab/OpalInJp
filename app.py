@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify, render_template
 from pathlib import Path
-import pandas as pd
 import numpy as np
-import json, os, time, threading
+import csv, json, os, time, threading
 import urllib.request, urllib.parse, urllib.error
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
@@ -118,17 +117,55 @@ def _density_radius(mineral):
 
 BASE = Path(__file__).parent
 _CSV_PATH = BASE / 'output' / 'mineral_candidates.csv'
+_NPZ_PATH = BASE / 'output' / 'mineral_candidates.npz'
+
+# アプリが使う列だけを numpy 配列で持つ（pandas 不使用）。
+# Render 無料枠はスリープ復帰のたびに起動するため、pandas import + 24MB CSV パースを
+# 避けて 2MB の npz を読むだけにし、コールドスタートを短縮する。
+_STR_COLS = ('lithology_ja', 'formationage_ja')
+
+def _load_data():
+    # 鮮度判定は mtime ではなく npz に記録した CSV サイズで行う
+    # （git checkout 後の mtime は当てにならないため）
+    csv_size = _CSV_PATH.stat().st_size if _CSV_PATH.exists() else None
+    if _NPZ_PATH.exists():
+        with np.load(_NPZ_PATH, allow_pickle=False) as z:
+            data = {k: z[k] for k in z.files}
+        if csv_size is None or int(data.get('_csv_size', -1)) == csv_size:
+            return data
+    if not _CSV_PATH.exists():
+        raise SystemExit(
+            f"[起動失敗] {_CSV_PATH} も {_NPZ_PATH} も見つかりません。\n"
+            f"  README の手順に従って `python analyze_minerals.py` を実行するか、\n"
+            f"  既存の mineral_candidates.csv を output/ に配置してください。"
+        )
+    # CSV → npz 変換（初回のみ。以後は npz を読む）
+    with open(_CSV_PATH, encoding='utf-8-sig', newline='') as f:
+        rows = list(csv.DictReader(f))
+    cols = {}
+    for c in rows[0].keys():
+        vals = [r[c] for r in rows]
+        if c in _STR_COLS:
+            cols[c] = np.array([v if v else '—' for v in vals], dtype=str)
+        elif c == 'near_fault':
+            cols[c] = np.array([v == 'True' for v in vals], dtype=bool)
+        else:
+            try:
+                cols[c] = np.array([float(v) if v else np.nan for v in vals])
+            except ValueError:
+                continue  # 文字列列（symbol, group_ja 等）はアプリ未使用なので捨てる
+    cols['_csv_size'] = np.array(csv_size)
+    np.savez_compressed(_NPZ_PATH, **cols)
+    return cols
+
 try:
-    df = pd.read_csv(_CSV_PATH, encoding='utf-8-sig')
-except FileNotFoundError:
-    raise SystemExit(
-        f"[起動失敗] {_CSV_PATH} が見つかりません。\n"
-        f"  README の手順に従って `python analyze_minerals.py` を実行するか、\n"
-        f"  既存の mineral_candidates.csv を output/ に配置してください。"
-    )
+    D = _load_data()
+except SystemExit:
+    raise
 except Exception as e:
-    raise SystemExit(f"[起動失敗] {_CSV_PATH} の読み込みに失敗しました: {e}")
-print(f"データ読み込み完了: {len(df):,} ポリゴン")
+    raise SystemExit(f"[起動失敗] データの読み込みに失敗しました: {e}")
+N_ROWS = len(D['lat'])
+print(f"データ読み込み完了: {N_ROWS:,} ポリゴン")
 
 try:
     with open(BASE / 'output' / 'build_info.json', encoding='utf-8') as f:
@@ -163,14 +200,24 @@ MINERAL_COLORS = {
     'rhodochrosite':'#e91e63',
 }
 
-mineral_score_cols = [c for c in df.columns
+mineral_score_cols = [c for c in D
                       if c.startswith('score_') and c != 'score_hydrothermal']
 
-# 起動時に文字列 NaN を処理しておく
-for col in ['lithology_ja', 'formationage_ja', 'group_ja']:
-    if col in df.columns:
-        df[col] = df[col].fillna('—')
-df['near_fault'] = df['near_fault'].astype(bool)
+_RECORD_COLS = ['lat', 'lon', 'dist_km', 'sort_score', 'total_score',
+                'lithology_ja', 'formationage_ja', 'near_fault', 'dist_tokyo_km',
+                'score_locality', 'nearest_locality'] + mineral_score_cols
+if 'score_hydrothermal' in D:
+    _RECORD_COLS.append('score_hydrothermal')
+
+def _py(v):
+    """numpy スカラー → JSON 化できる Python 値（NaN は null）"""
+    if isinstance(v, (np.floating, float)):
+        return None if np.isnan(v) else float(v)
+    if isinstance(v, np.bool_):
+        return bool(v)
+    if isinstance(v, np.str_):
+        return str(v)
+    return v
 
 
 def haversine_vec(lat, lon, lats, lons):
@@ -199,57 +246,50 @@ def search():
     except (KeyError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
 
-    dists = haversine_vec(lat, lon, df['lat'].values, df['lon'].values)
+    dists = haversine_vec(lat, lon, D['lat'], D['lon'])
     mask  = dists <= radius_km
-    near  = df[mask].copy()
-    near['dist_km'] = np.round(dists[mask], 1)
 
     color = MINERAL_COLORS.get(mineral, '#2980b9')
 
-    if len(near) == 0:
-        return jsonify({'count': 0, 'results': [], 'color': color, 'max_score': 1})
-
-    if mineral == 'all':
-        sort_col = 'total_score'
-    else:
+    sort_col = 'total_score'
+    if mineral != 'all' and f'score_{mineral}' in D:
         sort_col = f'score_{mineral}'
-        if sort_col in near.columns:
-            near = near[near[sort_col] > 0]
-        else:
-            sort_col = 'total_score'
+        mask &= D[sort_col] > 0
 
-    if len(near) == 0:
+    idx = np.flatnonzero(mask)
+    if len(idx) == 0:
         return jsonify({'count': 0, 'results': [], 'color': color, 'max_score': 1})
 
     # 既知産地スコアを検索範囲内の全行に対してベクトル計算し、
-    # nlargest で上位80件を選ぶ「前」にランキングへ反映する
+    # 上位80件を選ぶ「前」にランキングへ反映する
     # （事後計算だと、既知産地に近くても他の要素が弱いポリゴンが
     #   上位80件からそもそも漏れ、ボーナスが一切効かなくなるため）
-    loc_scores, loc_notes = _locality_score_vec(near['lat'].values, near['lon'].values, mineral)
-    near['score_locality']   = loc_scores
-    near['nearest_locality'] = loc_notes
-    near['rank_score'] = (near[sort_col].fillna(0) + near['score_locality']).round(2)
+    loc_scores, loc_notes = _locality_score_vec(D['lat'][idx], D['lon'][idx], mineral)
+    rank = np.round(np.nan_to_num(D[sort_col][idx]) + loc_scores, 2)
 
-    top = near.nlargest(80, 'rank_score').copy()
-    top['sort_score'] = top['rank_score']
+    order = np.argsort(-rank, kind='stable')[:80]
+    top   = idx[order]
 
-    keep = ['lat', 'lon', 'dist_km', 'sort_score', 'total_score',
-            'lithology_ja', 'formationage_ja', 'near_fault', 'dist_tokyo_km',
-            'score_locality', 'nearest_locality']
-    keep += [c for c in mineral_score_cols if c in top.columns]
-    if 'score_hydrothermal' in top.columns:
-        keep.append('score_hydrothermal')
-    keep = [c for c in keep if c in top.columns]
-
-    # pandas の to_json は NaN → null を自動処理
-    records = json.loads(top[keep].to_json(orient='records', force_ascii=False))
+    near_cols = {
+        'dist_km':          np.round(dists[idx], 1),
+        'sort_score':       rank,
+        'score_locality':   loc_scores,
+        'nearest_locality': loc_notes,
+    }
+    records = []
+    for o, i in zip(order, top):
+        rec = {}
+        for c in _RECORD_COLS:
+            v = near_cols[c][o] if c in near_cols else D[c][i]
+            rec[c] = _py(v)
+        records.append(rec)
 
     return jsonify({
-        'count':          len(near),
+        'count':          len(idx),
         'results':        records,
         'sort_col':       sort_col,
         'color':          color,
-        'max_score':      float(top['sort_score'].max()),
+        'max_score':      float(rank[order[0]]),
         'mineral_labels': MINERAL_LABELS,
     })
 
@@ -321,15 +361,15 @@ def rivers_api():
         ref_radius = _density_radius(mineral)
 
         # 検索範囲のポリゴンを絞り込む（numpy 配列で持つことで pandas インデックス問題を回避）
-        dists = haversine_vec(lat, lon, df['lat'].values, df['lon'].values)
+        dists = haversine_vec(lat, lon, D['lat'], D['lon'])
         mask  = dists <= radius_km
-        near_lats   = df['lat'].values[mask]
-        near_lons   = df['lon'].values[mask]
+        near_lats   = D['lat'][mask]
+        near_lons   = D['lon'][mask]
 
         sort_col = 'total_score' if mineral == 'all' else f'score_{mineral}'
-        if sort_col not in df.columns:
+        if sort_col not in D:
             sort_col = 'total_score'
-        near_scores = df[sort_col].values[mask]
+        near_scores = D[sort_col][mask]
 
         max_score = float(near_scores.max()) if len(near_scores) > 0 else 1.0
 

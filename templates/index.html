@@ -1050,12 +1050,15 @@ function renderResults(data) {
     list.appendChild(card);
 
     // ── マーカー（鉱物アイコン＋スコア連動グロー）──
+    // グローは filter:drop-shadow ではなく box-shadow で描く。
+    // filter はマーカーごとに GPU 合成レイヤーを要求し、300 個超の
+    // マーカーが並ぶとスマホでのパン・ズームが目に見えて重くなるため。
     const r        = 4 + ratio * 7;
     const iconSize = Math.round(r * 2.4 + 4);
     const glowPx   = Math.round(2 + ratio * 6);
     const icon     = L.divIcon({
       html: '<div style="width:' + iconSize + 'px;height:' + iconSize + 'px;' +
-            'filter:drop-shadow(0 0 ' + glowPx + 'px ' + c + ')">' +
+            'border-radius:50%;box-shadow:0 0 ' + glowPx + 'px ' + glowPx + 'px ' + c + '66">' +
             (MINERAL_ICON_SVG[mineral] || MINERAL_ICON_SVG.all) + '</div>',
       iconSize:   [iconSize, iconSize],
       iconAnchor: [iconSize / 2, iconSize / 2],
@@ -1249,7 +1252,7 @@ function makeLocalityIcon(mineral, confidence) {
     html: '<div style="width:' + size + 'px;height:' + size + 'px;' +
           'display:flex;align-items:center;justify-content:center;' +
           'font-size:' + Math.round(size * 0.8) + 'px;' +
-          'filter:drop-shadow(0 0 ' + glow + 'px ' + color + ')">⭐</div>',
+          'text-shadow:0 0 ' + glow + 'px ' + color + '">⭐</div>',
     iconSize:   [size, size],
     iconAnchor: [size / 2, size / 2],
     className:  ''
@@ -1259,7 +1262,7 @@ function makeLocalityIcon(mineral, confidence) {
 const LEGEND_ICON = L.divIcon({
   html: '<div style="width:26px;height:26px;display:flex;align-items:center;' +
         'justify-content:center;font-size:20px;' +
-        'filter:drop-shadow(0 0 4px #f39c12)">📜</div>',
+        'text-shadow:0 0 4px #f39c12">📜</div>',
   iconSize:   [26, 26],
   iconAnchor: [13, 13],
   className:  ''
@@ -1421,7 +1424,7 @@ function renderParkLayer(parks) {
   parkLayer.clearLayers();
   parks.forEach(function(p) {
     const icon = L.divIcon({
-      html: '<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 5px #e74c3c)">🚫</div>',
+      html: '<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:18px;text-shadow:0 0 5px #e74c3c">🚫</div>',
       iconSize: [26, 26], iconAnchor: [13, 13], className: ''
     });
     const m = L.marker([p.lat, p.lon], { icon });
@@ -1444,7 +1447,7 @@ function renderHotspringLayer(hotsprings) {
   hotspringLayer.clearLayers();
   hotsprings.forEach(function(h) {
     const icon = L.divIcon({
-      html: '<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 4px #e67e22)">♨</div>',
+      html: '<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:18px;text-shadow:0 0 4px #e67e22">♨</div>',
       iconSize: [24, 24], iconAnchor: [12, 12], className: ''
     });
     const m = L.marker([h.lat, h.lon], { icon });
@@ -1467,7 +1470,7 @@ function renderMineLayer(mines) {
   mineLayer.clearLayers();
   mines.forEach(function(mi) {
     const icon = L.divIcon({
-      html: '<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:18px;filter:drop-shadow(0 0 4px #f0b429)">⛏</div>',
+      html: '<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:18px;text-shadow:0 0 4px #f0b429">⛏</div>',
       iconSize: [24, 24], iconAnchor: [12, 12], className: ''
     });
     const m = L.marker([mi.lat, mi.lon], { icon });

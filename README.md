@@ -123,7 +123,7 @@
 
 ### 必要なもの
 - Python 3.11+
-- `output/mineral_candidates.csv`（解析スクリプトが生成。大容量のため Git 管理外）
+- `output/mineral_candidates.npz`（アプリが読む軽量データ。Git 管理。`mineral_candidates.csv` より古い場合は起動時に CSV から自動再生成）
 
 ### セットアップ
 ```bash
@@ -143,7 +143,7 @@ python app.py
 # 地質図ポリゴンを解析して mineral_candidates.csv を生成
 python analyze_minerals.py
 ```
-> ⚠️ 全国 162,000+ ポリゴンの処理に数十分かかります。大容量ファイルは `.gitignore` で除外しています。
+> ⚠️ 全国 162,000+ ポリゴンの処理に数十分かかります。解析スクリプトには pandas / geopandas が別途必要です（Web アプリ本体は numpy のみ）。CSV を更新したら `python app.py` を一度起動すると `mineral_candidates.npz` が再生成されるので、それをコミットしてください。
 
 ### Mindat.org 産地データのインポート（任意）
 ```bash
@@ -158,7 +158,7 @@ APIキーは https://www.mindat.org/a/mindat_api で無料取得できます。�
 
 | レイヤ | 技術 |
 |--------|------|
-| バックエンド | Python 3.11 / Flask / pandas / numpy / geopandas |
+| バックエンド | Python 3.11 / Flask / numpy（解析パイプラインのみ pandas / geopandas） |
 | フロントエンド | Leaflet.js 1.9 / Vanilla JS / CSS |
 | 地図タイル | 国土地理院淡色地図（CSS フィルターでダーク化） |
 | 空間演算 | geopandas sjoin / numpy ベクトル化 haversine |
